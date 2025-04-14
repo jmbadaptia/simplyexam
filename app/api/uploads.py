@@ -26,7 +26,8 @@ def upload_json():
         return jsonify({'error': 'Tipo de archivo no permitido'}), 400
     
     try:
-        session_id = str(uuid.uuid4())
+        session = create_session()
+        session_id = session.id
         json_filename = f"{session_id}_{json_file.filename}"
         json_path = os.path.join(settings.UPLOAD_FOLDER, json_filename)
         
@@ -51,9 +52,7 @@ def upload_json():
             else:
                 text_fields.add(field_name)
         
-        # Crear sesión
-        session = create_session()
-        session.id = session_id
+        # Actualizar sesión
         session.json_path = json_path
         session.zones_info = zones_info
         session.text_fields = list(text_fields)
