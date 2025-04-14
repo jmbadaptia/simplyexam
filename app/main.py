@@ -2,6 +2,8 @@ import os
 import sys
 import logging
 from flask import Flask
+from fastapi import FastAPI
+from fastapi.middleware.wsgi import WSGIMiddleware
 from dotenv import load_dotenv
 
 # Cargar variables de entorno antes de importar otros módulos
@@ -17,11 +19,11 @@ logger = logging.getLogger(__name__)
 
 # Importaciones internas
 from app.config import settings
-from app.api import routes_bp, uploads_bp, processing_bp
+from app.api import routes_bp, uploads_bp, processing_router
 from app.core.processors.handwriting import HandwritingProcessor
 from app.core.processors.mark import MarkProcessor
 
-def create_app():
+def create_flask_app():
     """Crear y configurar la aplicación Flask"""
     app = Flask(__name__, 
                 static_folder=str(settings.STATIC_FOLDER),
@@ -38,7 +40,15 @@ def create_app():
     # Registrar blueprints
     app.register_blueprint(routes_bp)
     app.register_blueprint(uploads_bp)
-    app.register_blueprint(processing_bp)
+    
+    return app
+
+def create_fastapi_app():
+    """Crear y configurar la aplicación FastAPI"""
+    app = FastAPI(title="SimplyExam API")
+    
+    # Incluir routers
+    app.include_router(processing_router)
     
     return app
 
@@ -64,14 +74,21 @@ def main():
         # Inicializar procesadores
         initialize_processors()
         
+        # Crear aplicación FastAPI
+        fastapi_app = create_fastapi_app()
+        
         # Crear aplicación Flask
-        app = create_app()
+        flask_app = create_flask_app()
+        
+        # Montar Flask app en FastAPI
+        fastapi_app.mount("/", WSGIMiddleware(flask_app))
         
         # Configuración del puerto
         port = int(os.environ.get('PORT', 5000))
         
-        # Iniciar el servidor de desarrollo Flask
-        app.run(host='0.0.0.0', port=port, debug=True, use_reloader=False)
+        # Iniciar el servidor con uvicorn
+        import uvicorn
+        uvicorn.run(fastapi_app, host='0.0.0.0', port=port)
         
     except Exception as e:
         logger.error(f"Error al iniciar la aplicación: {e}", exc_info=True)
