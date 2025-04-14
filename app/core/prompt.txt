@@ -10,41 +10,41 @@ Para cada campo, sigue estas instrucciones:
 
 Responde ÚNICAMENTE con un JSON válido sin explicaciones, comentarios o texto adicional antes o después. 
 Utiliza esta estructura para el JSON:
-{
+{{
     "campos": [
-        {
+        {{
             "nombre": "NOMBRE_DEL_CAMPO",
             "valor": "VALOR_RECONOCIDO"
-        }
+        }}
     ]
-}
+}}
 
 Ejemplo de respuesta:
-{
+{{
     "campos": [
-        {
+        {{
             "nombre": "APELLIDO1",
             "valor": "GARCIA"
-        },
-        {
+        }},
+        {{
             "nombre": "APELLIDO2",
             "valor": "LOPEZ"
-        },
-        {
+        }},
+        {{
             "nombre": "NOMBRE",
             "valor": "JUAN"
-        },
-        {
+        }},
+        {{
             "nombre": "DNI",
             "valor": "12345678A"
-        },
-        {
+        }},
+        {{
             "nombre": "FECHA",
             "valor": "14/04/2025"
-        },
-        {
+        }},
+        {{
             "nombre": "PUESTO",
             "valor": "ANALISTA"
-        }
+        }}
     ]
-} 
+}} 
