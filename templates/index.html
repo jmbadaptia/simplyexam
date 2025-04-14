@@ -198,6 +198,7 @@
                 if (data.success) {
                     imagePreview.innerHTML = `<img src="data:image/jpeg;base64,${data.image_base64}" style="max-width: 100%;">`;
                     overlayBtn.disabled = false;
+                    recognizeBtn.disabled = false;
                 } else {
                     imagePreview.innerHTML = `<p style="color: red;">Error: ${data.error}</p>`;
                 }
@@ -281,42 +282,20 @@
 
         // Función para actualizar la lista de campos
         function updateFieldsList() {
-            const allFields = [...textFields, ...markFields].sort();
-            
-            if (allFields.length === 0) {
-                fieldsList.innerHTML = '<p>No se encontraron campos en el JSON.</p>';
+            const fieldsContainer = document.getElementById('fieldsList');
+            if (!textFields.length) {
+                fieldsContainer.innerHTML = '<p>No hay campos de texto disponibles</p>';
                 return;
             }
-            
-            let html = '';
-            
-            if (textFields.length > 0) {
-                html += '<h3>Campos de texto:</h3>';
-                textFields.forEach(field => {
-                    html += `
-                        <div>
-                            <label>
-                                <input type="checkbox" value="${field}"> ${field}
-                            </label>
-                        </div>
-                    `;
-                });
-            }
-            
-            if (markFields.length > 0) {
-                html += '<h3>Campos de marca:</h3>';
-                markFields.forEach(field => {
-                    html += `
-                        <div>
-                            <label>
-                                <input type="checkbox" value="${field}"> ${field}
-                            </label>
-                        </div>
-                    `;
-                });
-            }
-            
-            fieldsList.innerHTML = html;
+
+            const html = textFields.map(field => `
+                <div class="field-item">
+                    <input type="checkbox" id="${field}" name="field" value="${field}" checked>
+                    <label for="${field}">${field}</label>
+                </div>
+            `).join('');
+
+            fieldsContainer.innerHTML = html;
         }
 
         // Función para mostrar los resultados

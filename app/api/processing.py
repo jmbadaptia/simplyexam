@@ -1,4 +1,3 @@
-
 import os
 import json
 import logging
@@ -8,6 +7,7 @@ from flask import Blueprint, request, jsonify
 from app.config import settings
 from app.core.utils.image_utils import overlay_zones_on_image
 from app.session import get_session
+from fastapi import Request, HTTPException
 
 logger = logging.getLogger(__name__)
 
@@ -113,89 +113,51 @@ def get_fields():
 
 @processing_bp.route('/api/recognize-text', methods=['POST'])
 def recognize_text():
-    """Procesar texto y marcas en la imagen"""
+    """Reconocer texto en las ROIs seleccionadas"""
     try:
-        session_id = request.form.get('session_id')
-        if not session_id:
-            return jsonify({'error': 'Falta ID de sesión'}), 400
-
-        session = get_session(session_id)
-        if not session:
-            return jsonify({'error': 'Sesión no válida'}), 400
-
-        if 'json_upload' not in session.completed_steps:
-            return jsonify({'error': 'Debe subir el JSON primero'}), 400
+        # Verificar sesión
+        session = request.session
+        if not session.get("image_path"):
+            raise HTTPException(status_code=400, detail="No hay imagen cargada")
 
         # Obtener campos seleccionados
-        selected_fields = request.form.getlist('selected_fields[]')
+        form = request.form
+        selected_fields = form.getlist("fields[]")
+        
         if not selected_fields:
-            return jsonify({'error': 'Debe seleccionar campos'}), 400
+            raise HTTPException(status_code=400, detail="No se seleccionaron campos")
 
-        # Leer la imagen
-        image_path = session.image_path
-        if not image_path or not os.path.exists(image_path):
-            return jsonify({'error': 'Imagen no encontrada'}), 400
+        # Leer imagen
+        image_path = session["image_path"]
+        if not os.path.exists(image_path):
+            raise HTTPException(status_code=400, detail="Imagen no encontrada")
 
         image = cv2.imread(image_path)
         if image is None:
-            return jsonify({'error': 'Error al leer la imagen'}), 500
+            raise HTTPException(status_code=400, detail="Error al leer la imagen")
 
-        # Extraer ROIs
+        # Obtener ROIs
         rois = []
-        field_names = []
+        if session.get("rois"):
+            for field in selected_fields:
+                if field in session["rois"]:
+                    roi_coords = session["rois"][field]
+                    x, y, w, h = map(int, roi_coords)
+                    roi = image[y:y+h, x:x+w]
+                    if roi is not None and roi.size > 0:
+                        rois.append(roi)
+                    else:
+                        logger.warning(f"ROI inválida para el campo {field}")
 
-        for zone in session.zones_info:
-            if zone['name'] not in selected_fields:
-                continue
+        if not rois:
+            raise HTTPException(status_code=400, detail="No se encontraron ROIs válidas")
 
-            x = int(zone.get('left', 0))
-            y = int(zone.get('top', 0))
-            w = int(zone.get('width', 0))
-            h = int(zone.get('height', 0))
+        # Procesar texto
+        processor = HandwritingProcessor()
+        results = processor.process_batch(rois, selected_fields)
 
-            if x < 0 or y < 0 or w <= 0 or h <= 0:
-                continue
-
-            roi = image[y:y+h, x:x+w]
-            if roi.size == 0:
-                continue
-
-            rois.append(roi)
-            field_names.append(zone['name'])
-
-        # Importar procesadores solo cuando son necesarios
-        from app.core.processors.handwriting import HandwritingProcessor
-        from app.core.processors.mark import MarkProcessor
-
-        # Obtener instancias de procesadores
-        handwriting_processor = HandwritingProcessor()
-        mark_processor = MarkProcessor()
-        mark_processor.set_debug_folder(settings.OCR_RESULTS_FOLDER)
-
-        # Configurar campos
-        handwriting_processor.set_text_fields(set(session.text_fields))
-        mark_processor.set_mark_fields(set(session.mark_fields))
-
-        # Procesar ROIs
-        text_results = handwriting_processor.process_batch(rois, field_names)
-        mark_results, mark_details = mark_processor.process_batch(rois, field_names)
-
-        # Combinar resultados
-        results = {**text_results, **mark_results}
-        results['marks'] = mark_details
-
-        # Guardar resultados
-        results_filename = f"{session_id}_results.json"
-        results_path = os.path.join(settings.OCR_RESULTS_FOLDER, results_filename)
-
-        with open(results_path, 'w', encoding='utf-8') as f:
-            json.dump(results, f, ensure_ascii=False, indent=2)
-
-        return jsonify({
-            'success': True,
-            'results': results
-        })
+        return {"success": True, "results": results}
 
     except Exception as e:
-        logger.error(f"Error en reconocimiento: {e}", exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error en reconocimiento de texto: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))

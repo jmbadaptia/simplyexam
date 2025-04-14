@@ -4,7 +4,8 @@ import logging
 import anthropic
 import cv2
 import base64
-from typing import Dict, Any, Optional
+import numpy as np
+from typing import Dict, Any, Optional, List
 from app.config import settings
 from app.core.utils.async_utils import process_with_timeout
 from . import BaseProcessor
@@ -114,66 +115,68 @@ class HandwritingProcessor(BaseProcessor):
         # Procesar las ROIs
         return self.process_batch(rois, field_names)
 
-    def process_batch(self, rois: list, field_names: list) -> Dict[str, Any]:
-        """Procesar un lote de ROIs de texto"""
-        results = {}
-        
-        if not self._text_fields:
-            return results
-
+    def process_batch(self, rois: List[np.ndarray], field_names: List[str]) -> Dict[str, str]:
+        """Procesa un lote de ROIs y extrae el texto usando Claude"""
         try:
-            # Preparar el mensaje para Claude
-            message = {
-                "model": settings.CLAUDE_MODEL,
-                "max_tokens": settings.CLAUDE_MAX_TOKENS,
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": "Analiza el siguiente texto manuscrito y extrae los valores de los campos solicitados. Responde en formato JSON con la siguiente estructura: {\"campos\": [{\"nombre\": \"NOMBRE_DEL_CAMPO\", \"valor\": \"VALOR_RECONOCIDO\"}]}"
-                            }
-                        ]
-                    }
-                ]
+            if not rois or not field_names:
+                logger.warning("No hay ROIs o nombres de campos para procesar")
+                return {}
+
+            # Preparar imágenes en base64
+            images_content = []
+            for roi in rois:
+                # Convertir imagen a base64
+                _, buffer = cv2.imencode('.png', roi)
+                img_base64 = base64.b64encode(buffer).decode('utf-8')
+                images_content.append(img_base64)
+
+            # Construir mensaje para Claude
+            prompt = {
+                "task": "text_extraction",
+                "instructions": "Por favor analiza las siguientes imágenes y extrae el texto manuscrito que contienen. Responde en formato JSON con el texto extraído para cada campo.",
+                "fields": field_names
             }
 
-            # Llamar a Claude
-            response = process_with_timeout(
-                self._client.messages.create,
-                args=message,
-                timeout=settings.CLAUDE_TIMEOUT
+            # Construir el contenido del mensaje
+            message_content = [
+                {
+                    "type": "text",
+                    "text": str(prompt)
+                }
+            ]
+
+            # Agregar cada imagen al contenido
+            for img_base64 in images_content:
+                message_content.append({
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/png",
+                        "data": img_base64
+                    }
+                })
+
+            # Enviar mensaje a Claude
+            response = self._client.messages.create(
+                model="claude-3-opus-20240229",
+                max_tokens=1000,
+                messages=[{
+                    "role": "user",
+                    "content": message_content
+                }]
             )
 
-            if response and response.content:
-                text = response.content[0].text.strip()
-                logger.info(f"Respuesta de Claude recibida: {text}")
+            # Procesar respuesta
+            results = {}
+            try:
+                response_text = response.content[0].text
+                results = eval(response_text)  # Convertir string JSON a dict
+            except Exception as e:
+                logger.error(f"Error al procesar respuesta de Claude: {e}", exc_info=True)
+                results = {}
 
-                try:
-                    # Parsear respuesta JSON
-                    result = json.loads(text)
-                    self._claude_results = {}
-
-                    for campo in result.get('campos', []):
-                        nombre = campo.get('nombre', '').upper()
-                        valor = campo.get('valor', 'NO_RECONOCIDO')
-                        if nombre in self._text_fields:
-                            self._claude_results[nombre] = valor
-                            results[nombre] = valor
-
-                    # Mostrar resultados
-                    logger.info("\nRESULTADOS DE TEXTO (Claude):")
-                    logger.info("=" * 50)
-                    for nombre, valor in sorted(self._claude_results.items()):
-                        logger.info(f"{nombre:<20}| {valor}")
-
-                except json.JSONDecodeError as e:
-                    logger.error(f"Error al parsear respuesta JSON: {e}")
-                    self._claude_results = {}
+            return results
 
         except Exception as e:
-            logger.error(f"Error en procesamiento de texto: {e}")
-            self._claude_results = {}
-
-        return results
+            logger.error(f"Error en process_batch: {e}", exc_info=True)
+            return {}
