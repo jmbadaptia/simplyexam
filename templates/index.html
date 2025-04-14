@@ -246,16 +246,17 @@
             }
         });
 
-        // Evento para reconocimiento de campos
+        // Evento para el botón de reconocimiento
         recognizeBtn.addEventListener('click', async () => {
             if (!sessionId) {
-                alert('Primero debes completar los pasos anteriores.');
+                alert('Primero debes cargar el archivo JSON y la imagen.');
                 return;
             }
 
             // Obtener los campos seleccionados
-            const selectedFields = Array.from(document.querySelectorAll('#fieldsList input[type="checkbox"]:checked')).map(cb => cb.value);
-            
+            const selectedFields = Array.from(document.querySelectorAll('#fieldsList input[type="checkbox"]:checked'))
+                .map(checkbox => checkbox.value);
+
             if (selectedFields.length === 0) {
                 alert('Por favor, selecciona al menos un campo para reconocer.');
                 return;
@@ -266,7 +267,7 @@
             formData.append('fields', JSON.stringify(selectedFields));
 
             try {
-                results.innerHTML = '<p>Procesando... esto puede tomar unos momentos.</p>';
+                results.innerHTML = '<p>Procesando... por favor espere.</p>';
                 
                 const response = await fetch('/api/recognize-text', {
                     method: 'POST',
@@ -276,8 +277,12 @@
                 const data = await response.json();
 
                 if (data.success) {
-                    // Formatear y mostrar resultados
-                    displayResults(data.results);
+                    // Mostrar los resultados
+                    let resultsHtml = '<h3>Resultados:</h3>';
+                    for (const [field, value] of Object.entries(data.results)) {
+                        resultsHtml += `<p><strong>${field}:</strong> ${value}</p>`;
+                    }
+                    results.innerHTML = resultsHtml;
                 } else {
                     results.innerHTML = `<p style="color: red;">Error: ${data.error}</p>`;
                 }
@@ -288,55 +293,40 @@
 
         // Función para actualizar la lista de campos
         function updateFieldsList() {
-            const fieldsContainer = document.getElementById('fieldsList');
-            if (!textFields.length) {
-                fieldsContainer.innerHTML = '<p>No hay campos de texto disponibles</p>';
+            if (textFields.length === 0 && markFields.length === 0) {
+                fieldsList.innerHTML = '<p>No hay campos disponibles.</p>';
                 return;
             }
 
-            const html = textFields.map(field => `
-                <div class="field-item">
-                    <input type="checkbox" id="${field}" name="field" value="${field}" checked>
-                    <label for="${field}">${field}</label>
-                </div>
-            `).join('');
-
-            fieldsContainer.innerHTML = html;
-        }
-
-        // Función para mostrar los resultados
-        function displayResults(results) {
-            let html = '<h3>Resultados del reconocimiento:</h3>';
-            html += '<div style="overflow-x: auto;"><table border="1" cellpadding="8" style="border-collapse: collapse;">';
-            html += '<tr><th>Campo</th><th>Valor</th></tr>';
+            let html = '<div class="fields-group">';
             
-            // Resultados de texto
-            for (const [field, value] of Object.entries(results)) {
-                if (field !== 'marks') {
-                    html += `<tr><td>${field}</td><td>${value}</td></tr>`;
-                }
+            if (textFields.length > 0) {
+                html += '<h4>Campos de texto:</h4>';
+                textFields.forEach(field => {
+                    html += `
+                        <label>
+                            <input type="checkbox" value="${field}">
+                            ${field}
+                        </label><br>
+                    `;
+                });
             }
             
-            html += '</table></div>';
-            
-            // Información detallada sobre marcas
-            if (results.marks && Object.keys(results.marks).length > 0) {
-                html += '<h3>Detalles de marcas:</h3>';
-                html += '<div style="overflow-x: auto;"><table border="1" cellpadding="8" style="border-collapse: collapse;">';
-                html += '<tr><th>Campo</th><th>Estado</th><th>Porcentaje</th></tr>';
-                
-                for (const [field, info] of Object.entries(results.marks)) {
-                    html += `<tr>
-                        <td>${field}</td>
-                        <td>${info.marked ? '✓ MARCADO' : '✗ NO MARCADO'}</td>
-                        <td>${info.percentage.toFixed(2)}%</td>
-                    </tr>`;
-                }
-                
-                html += '</table></div>';
+            if (markFields.length > 0) {
+                html += '<h4>Campos de marca:</h4>';
+                markFields.forEach(field => {
+                    html += `
+                        <label>
+                            <input type="checkbox" value="${field}">
+                            ${field}
+                        </label><br>
+                    `;
+                });
             }
             
-            results.innerHTML = html;
+            html += '</div>';
+            fieldsList.innerHTML = html;
+            recognizeBtn.disabled = false;
         }
     </script>
 </body>
