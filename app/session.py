@@ -53,45 +53,53 @@ class Session:
             'rois': self.rois
         }
 
-# Almacén de sesiones
-_sessions: Dict[str, Session] = {}
-
-def create_session() -> Session:
-    """Crea una nueva sesión"""
-    session = Session()
-    _sessions[session.id] = session
-    logger.info(f"Sesión creada: {session.id}")
-    logger.debug(f"Total de sesiones activas: {len(_sessions)}")
-    logger.debug(f"IDs de sesiones activas: {list(_sessions.keys())}")
-    return session
-
-def get_session(session_id: str) -> Optional[Session]:
-    """Obtiene una sesión existente"""
-    session = _sessions.get(session_id)
-    if session is None:
-        logger.warning(f"Sesión no encontrada: {session_id}")
-        logger.debug(f"Total de sesiones activas: {len(_sessions)}")
-        logger.debug(f"IDs de sesiones activas: {list(_sessions.keys())}")
-    else:
-        logger.debug(f"Sesión encontrada: {session_id}")
-    return session
-
-def cleanup_sessions(max_age=3600):
-    """Limpia sesiones antiguas"""
-    now = time.time()
-    to_delete = []
+class SessionManager:
+    """Gestiona el almacenamiento y recuperación de sesiones"""
     
-    for session_id, session in _sessions.items():
-        if (now - session.created_at) > max_age:
-            to_delete.append(session_id)
-            
-    for session_id in to_delete:
-        del _sessions[session_id]
+    _sessions: Dict[str, Session] = {}
+    
+    @classmethod
+    def create_session(cls) -> Session:
+        """Crea una nueva sesión"""
+        session = Session()
+        cls._sessions[session.id] = session
+        logger.info(f"Sesión creada: {session.id}")
+        logger.debug(f"Total de sesiones activas: {len(cls._sessions)}")
+        logger.debug(f"IDs de sesiones activas: {list(cls._sessions.keys())}")
+        return session
+    
+    @classmethod
+    def get_session(cls, session_id: str) -> Optional[Session]:
+        """Obtiene una sesión existente"""
+        session = cls._sessions.get(session_id)
+        if session is None:
+            logger.warning(f"Sesión no encontrada: {session_id}")
+            logger.debug(f"Total de sesiones activas: {len(cls._sessions)}")
+            logger.debug(f"IDs de sesiones activas: {list(cls._sessions.keys())}")
+        else:
+            logger.debug(f"Sesión encontrada: {session_id}")
+        return session
+    
+    @classmethod
+    def cleanup_sessions(cls, max_age=3600):
+        """Limpia sesiones antiguas"""
+        now = time.time()
+        to_delete = []
         
-    if to_delete:
-        logger.info(f"Limpiadas {len(to_delete)} sesiones antiguas")
-        logger.debug(f"Sesiones eliminadas: {to_delete}")
-        logger.debug(f"Sesiones restantes: {list(_sessions.keys())}")
+        for session_id, session in cls._sessions.items():
+            if (now - session.created_at) > max_age:
+                to_delete.append(session_id)
+                
+        for session_id in to_delete:
+            del cls._sessions[session_id]
+            
+        if to_delete:
+            logger.info(f"Limpiadas {len(to_delete)} sesiones antiguas")
+            logger.debug(f"Sesiones eliminadas: {to_delete}")
+            logger.debug(f"Sesiones restantes: {list(cls._sessions.keys())}")
 
 # Para compatibilidad con el código original
-sessions = _sessions
+sessions = SessionManager._sessions
+create_session = SessionManager.create_session
+get_session = SessionManager.get_session
+cleanup_sessions = SessionManager.cleanup_sessions
