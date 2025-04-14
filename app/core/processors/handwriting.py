@@ -139,13 +139,13 @@ class HandwritingProcessor(BaseProcessor):
             # Obtener la ruta del PDF de la sesión
             from app.session import get_session
             session = get_session(session_id)
-            if not session or not session.pdf_path:
+            if not session or not session.image_path:
                 logger.error("No hay PDF cargado en la sesión")
                 return {field: "ERROR" for field in field_names}
 
             # Leer el PDF y convertirlo a base64
             try:
-                with open(session.pdf_path, "rb") as pdf_file:
+                with open(session.image_path, "rb") as pdf_file:
                     pdf_base64 = base64.b64encode(pdf_file.read()).decode('utf-8')
             except Exception as e:
                 logger.error(f"Error al leer el PDF: {e}", exc_info=True)
