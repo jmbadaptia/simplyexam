@@ -119,7 +119,7 @@ def upload_pdf():
         pdf_path = os.path.join(settings.UPLOAD_FOLDER, pdf_filename)
         pdf_file.save(pdf_path)
         
-        # Si es PDF, convertir a imagen
+        # Si es PDF, convertir a imagen para visualización
         if is_pdf:
             try:
                 # Configuración para la conversión
@@ -160,9 +160,6 @@ def upload_pdf():
                 
                 logger.info(f"Imagen guardada y redimensionada a {target_width}x{target_height}: {image_path}")
                 
-                # Eliminar el PDF original
-                os.remove(pdf_path)
-                
             except Exception as e:
                 logger.error(f"Error al convertir PDF: {e}", exc_info=True)
                 return jsonify({'error': f'Error al procesar el PDF: {str(e)}'}), 500
@@ -172,7 +169,7 @@ def upload_pdf():
         
         # Actualizar datos de sesión
         session.update(
-            pdf_path=pdf_path if not is_pdf else None,
+            pdf_path=pdf_path,  # Siempre guardamos la ruta del PDF
             image_path=image_path,
             is_pdf=is_pdf
         )
