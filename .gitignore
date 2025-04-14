@@ -1,0 +1,55 @@
+# Python virtual environment
+venv/
+env/
+ENV/
+.env/
+.venv/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+*.egg
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+coverage.xml
+*.cover
+.pytest_cache/
+
+# IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Local development settings
+local_settings.py
+db.sqlite3
+
+# Project specific
+uploads/*
+!uploads/.gitkeep
+
+# Docker
+.docker/
+docker-compose.override.yml

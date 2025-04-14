@@ -1,0 +1,18 @@
+# Dependencias básicas
+Flask>=2.3.3
+Werkzeug>=2.3.7
+python-dotenv>=1.0.0
+
+# Procesamiento de imágenes
+pdf2image>=1.16.3
+Pillow>=10.0.0
+
+# Procesamiento de datos y visión por computadora
+opencv-python>=4.8.0.76
+numpy>=1.24.3
+
+# Para OCR
+pytesseract>=0.3.10
+
+# Para IA (Claude)
+anthropic>=0.5.0
