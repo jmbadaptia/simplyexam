@@ -5,15 +5,15 @@ from pathlib import Path
 
 # Configuración de directorios
 ROOT_DIR = Path(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-UPLOAD_FOLDER = ROOT_DIR / 'uploads'
-RESULTS_FOLDER = ROOT_DIR / 'results'
-OCR_RESULTS_FOLDER = RESULTS_FOLDER / 'ocr'
 STATIC_FOLDER = ROOT_DIR / 'static'
+UPLOAD_FOLDER = STATIC_FOLDER / 'uploads'
+RESULTS_FOLDER = STATIC_FOLDER / 'results'
+OCR_RESULTS_FOLDER = RESULTS_FOLDER / 'ocr'
 MODELS_FOLDER = ROOT_DIR / 'models'
 TEMPLATE_FOLDER = ROOT_DIR / 'templates'
 
 # Para asegurar que los directorios existan
-for folder in [UPLOAD_FOLDER, RESULTS_FOLDER, OCR_RESULTS_FOLDER, STATIC_FOLDER, MODELS_FOLDER, TEMPLATE_FOLDER]:
+for folder in [STATIC_FOLDER, UPLOAD_FOLDER, RESULTS_FOLDER, OCR_RESULTS_FOLDER, MODELS_FOLDER, TEMPLATE_FOLDER]:
     os.makedirs(folder, exist_ok=True)
 
 # Configuración de la aplicación

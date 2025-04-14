@@ -58,7 +58,9 @@ async def overlay_zones(
         session.add_completed_step('overlay')
 
         # Construir la URL para acceder a la imagen
-        image_url = f"/static/results/{result_filename}"
+        # La URL debe ser relativa a /static
+        relative_path = os.path.relpath(result_path, settings.STATIC_FOLDER)
+        image_url = f"/static/{relative_path.replace(os.sep, '/')}"
 
         logger.info(f"Imagen generada en: {result_path}")
         logger.info(f"URL de la imagen: {image_url}")
@@ -133,6 +135,7 @@ async def recognize_text(
 
         logger.info(f"Campos recibidos: {fields_list}")
 
+        # Validar sesión y estado
         session = get_session(session_id)
         if not session:
             raise HTTPException(status_code=400, detail="Sesión no válida")
@@ -158,7 +161,7 @@ async def recognize_text(
         
         if not hasattr(session, 'rois'):
             raise HTTPException(status_code=400, detail="No hay ROIs definidas en la sesión")
-            
+
         logger.info(f"ROIs disponibles en sesión: {session.rois.keys()}")
         
         for field in fields_list:
