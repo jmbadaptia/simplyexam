@@ -109,34 +109,50 @@ def upload_pdf():
         # Si es PDF, convertir a imagen
         if is_pdf:
             try:
-                # Convertir primera página del PDF a imagen manteniendo la relación de aspecto
+                # Configuración para la conversión
+                target_width = 1786
+                target_height = 2526
+                dpi = 200
+                
+                # Ruta a poppler según el sistema operativo
+                if os.name == 'nt':  # Windows
+                    poppler_path = r"C:\Python312\poppler-24.08.0\Library\bin"
+                else:  # Linux/Unix
+                    poppler_path = None  # En Linux normalmente no es necesario especificarlo
+                
+                logger.info(f"Iniciando conversión de PDF con DPI={dpi}")
+                
+                # Convertir PDF a imagen
                 images = convert_from_path(
                     pdf_path,
+                    dpi=dpi,
+                    output_folder=settings.UPLOAD_FOLDER,
+                    fmt='jpg',
+                    paths_only=False,
+                    poppler_path=poppler_path,
                     first_page=1,
-                    last_page=1,
-                    size=(1786, 2526),  # Dimensiones exactas
-                    dpi=200,           # 200 DPI
-                    thread_count=1,    # Para evitar problemas de concurrencia
-                    use_cropbox=False, # Usar el tamaño completo
-                    strict=True       # Ser estricto con las dimensiones
+                    last_page=1
                 )
+                
                 if not images:
                     return jsonify({'error': 'No se pudo extraer imagen del PDF'}), 500
                 
-                # Guardar la primera página como imagen manteniendo dimensiones exactas
-                image = images[0]
-                image = image.resize((1786, 2526), Image.Resampling.LANCZOS)  # Redimensionar con alta calidad
+                # Redimensionar a las dimensiones exactas
+                image = images[0].resize((target_width, target_height), Image.LANCZOS)
                 
+                # Guardar la imagen
                 image_filename = pdf_filename.rsplit('.', 1)[0] + '.jpg'
                 image_path = os.path.join(settings.UPLOAD_FOLDER, image_filename)
-                image.save(image_path, 'JPEG', quality=95, dpi=(200, 200))  # Alta calidad y DPI específico
+                image.save(image_path, format='JPEG', quality=95)
                 
-                # Eliminar el PDF original ya que tenemos la imagen
+                logger.info(f"Imagen guardada y redimensionada a {target_width}x{target_height}: {image_path}")
+                
+                # Eliminar el PDF original
                 os.remove(pdf_path)
                 
             except Exception as e:
                 logger.error(f"Error al convertir PDF: {e}", exc_info=True)
-                return jsonify({'error': 'Error al procesar el PDF'}), 500
+                return jsonify({'error': f'Error al procesar el PDF: {str(e)}'}), 500
         else:
             image_path = pdf_path
         
