@@ -7,14 +7,19 @@ from dotenv import load_dotenv
 # Cargar variables de entorno antes de importar otros módulos
 load_dotenv()
 
+# Configurar logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
+
 # Importaciones internas
 from app.config import settings
 from app.api import routes_bp, uploads_bp, processing_bp
 from app.core.processors.handwriting import HandwritingProcessor
 from app.core.processors.mark import MarkProcessor
-
-# Configurar logging
-logger = logging.getLogger(__name__)
 
 def create_app():
     """Crear y configurar la aplicación Flask"""

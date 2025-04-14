@@ -20,9 +20,11 @@ class Session:
         self.overlay_path = None
         self.completed_steps = []
         self.results = {}
+        logger.debug(f"Nueva sesión inicializada con ID: {self.id}")
         
     def update(self, **kwargs):
         """Actualiza atributos de la sesión"""
+        logger.debug(f"Actualizando sesión {self.id} con: {kwargs}")
         for key, value in kwargs.items():
             if hasattr(self, key):
                 setattr(self, key, value)
@@ -31,10 +33,13 @@ class Session:
         """Añade un paso completado"""
         if step not in self.completed_steps:
             self.completed_steps.append(step)
+            logger.debug(f"Paso '{step}' completado en sesión {self.id}")
     
     def is_step_completed(self, step):
         """Verifica si un paso está completado"""
-        return step in self.completed_steps
+        completed = step in self.completed_steps
+        logger.debug(f"Verificando paso '{step}' en sesión {self.id}: {'completado' if completed else 'pendiente'}")
+        return completed
         
     def to_dict(self):
         """Convierte la sesión a diccionario"""
@@ -54,11 +59,20 @@ def create_session() -> Session:
     session = Session()
     _sessions[session.id] = session
     logger.info(f"Sesión creada: {session.id}")
+    logger.debug(f"Total de sesiones activas: {len(_sessions)}")
+    logger.debug(f"IDs de sesiones activas: {list(_sessions.keys())}")
     return session
 
 def get_session(session_id: str) -> Optional[Session]:
     """Obtiene una sesión existente"""
-    return _sessions.get(session_id)
+    session = _sessions.get(session_id)
+    if session is None:
+        logger.warning(f"Sesión no encontrada: {session_id}")
+        logger.debug(f"Total de sesiones activas: {len(_sessions)}")
+        logger.debug(f"IDs de sesiones activas: {list(_sessions.keys())}")
+    else:
+        logger.debug(f"Sesión encontrada: {session_id}")
+    return session
 
 def cleanup_sessions(max_age=3600):
     """Limpia sesiones antiguas"""
@@ -74,6 +88,8 @@ def cleanup_sessions(max_age=3600):
         
     if to_delete:
         logger.info(f"Limpiadas {len(to_delete)} sesiones antiguas")
+        logger.debug(f"Sesiones eliminadas: {to_delete}")
+        logger.debug(f"Sesiones restantes: {list(_sessions.keys())}")
 
 # Para compatibilidad con el código original
 sessions = _sessions
