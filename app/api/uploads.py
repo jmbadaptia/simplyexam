@@ -9,6 +9,7 @@ from app.core.utils.file_utils import allowed_file, is_mark_field
 from app.session import create_session, get_session
 from pdf2image import convert_from_path
 import tempfile
+from PIL import Image
 
 logger = logging.getLogger(__name__)
 
@@ -108,21 +109,27 @@ def upload_pdf():
         # Si es PDF, convertir a imagen
         if is_pdf:
             try:
-                # Convertir primera página del PDF a imagen con tamaño y DPI específicos
+                # Convertir primera página del PDF a imagen manteniendo la relación de aspecto
                 images = convert_from_path(
                     pdf_path,
                     first_page=1,
                     last_page=1,
-                    size=(1786, 2526),  # Tamaño específico
-                    dpi=96  # DPI específico
+                    size=(1786, 2526),  # Dimensiones exactas
+                    dpi=200,           # 200 DPI
+                    thread_count=1,    # Para evitar problemas de concurrencia
+                    use_cropbox=False, # Usar el tamaño completo
+                    strict=True       # Ser estricto con las dimensiones
                 )
                 if not images:
                     return jsonify({'error': 'No se pudo extraer imagen del PDF'}), 500
                 
-                # Guardar la primera página como imagen
+                # Guardar la primera página como imagen manteniendo dimensiones exactas
+                image = images[0]
+                image = image.resize((1786, 2526), Image.Resampling.LANCZOS)  # Redimensionar con alta calidad
+                
                 image_filename = pdf_filename.rsplit('.', 1)[0] + '.jpg'
                 image_path = os.path.join(settings.UPLOAD_FOLDER, image_filename)
-                images[0].save(image_path, 'JPEG', quality=95)  # Alta calidad
+                image.save(image_path, 'JPEG', quality=95, dpi=(200, 200))  # Alta calidad y DPI específico
                 
                 # Eliminar el PDF original ya que tenemos la imagen
                 os.remove(pdf_path)
