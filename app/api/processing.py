@@ -204,7 +204,7 @@ async def recognize_text(
 
         # Procesar texto
         processor = HandwritingProcessor()
-        results = processor.process_batch(rois, fields_list)
+        results = processor.process_batch(rois, fields_list, session.id)
 
         # Agregar las imágenes al resultado
         response_data = {
