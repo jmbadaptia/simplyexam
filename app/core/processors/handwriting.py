@@ -9,6 +9,7 @@ from typing import Dict, Any, Optional, List
 from app.config import settings
 from app.core.utils.async_utils import process_with_timeout
 from . import BaseProcessor
+from app.session import SessionManager
 
 logger = logging.getLogger(__name__)
 
@@ -132,27 +133,30 @@ class HandwritingProcessor(BaseProcessor):
     def process_batch(self, rois: List[np.ndarray], field_names: List[str], session_id: str) -> Dict[str, str]:
         """Procesa un lote de ROIs y extrae el texto usando Claude"""
         try:
-            if not rois or not field_names:
-                logger.warning("No hay ROIs o nombres de campos para procesar")
-                return {}
-
-            # Obtener la ruta del PDF de la sesión
-            from app.session import get_session
-            session = get_session(session_id)
+            # Verificar que tenemos una sesión válida
+            session = SessionManager.get_session(session_id)
             if not session or not session.image_path:
-                logger.error("No hay PDF cargado en la sesión")
-                return {field: "ERROR" for field in field_names}
+                raise ValueError("No hay imagen cargada en la sesión")
 
-            # Leer el PDF y convertirlo a base64
-            try:
-                with open(session.image_path, "rb") as pdf_file:
-                    pdf_base64 = base64.b64encode(pdf_file.read()).decode('utf-8')
-                logger.info(f"PDF convertido a base64, longitud: {len(pdf_base64)}")
-            except Exception as e:
-                logger.error(f"Error al leer el PDF: {e}", exc_info=True)
-                return {field: "ERROR" for field in field_names}
+            # Leer el archivo y detectar su tipo
+            with open(session.image_path, "rb") as file:
+                file_content = file.read()
+                file_base64 = base64.b64encode(file_content).decode('utf-8')
+                
+                # Detectar el tipo de archivo basado en el contenido
+                if file_content.startswith(b'\x89PNG\r\n\x1a\n'):
+                    media_type = "image/png"
+                elif file_content.startswith(b'\xff\xd8\xff'):
+                    media_type = "image/jpeg"
+                elif file_content.startswith(b'%PDF'):
+                    media_type = "application/pdf"
+                else:
+                    raise ValueError("Tipo de archivo no soportado")
 
-            # Construir el contenido del mensaje
+            logger.info(f"Detectado tipo de archivo: {media_type}")
+            logger.info(f"Longitud del base64: {len(file_base64)}")
+
+            # Construir el mensaje con el tipo de archivo correcto
             message_content = [
                 {
                     "type": "text",
@@ -162,8 +166,8 @@ class HandwritingProcessor(BaseProcessor):
                     "type": "document",
                     "source": {
                         "type": "base64",
-                        "media_type": "application/pdf",
-                        "data": pdf_base64
+                        "media_type": media_type,
+                        "data": file_base64
                     }
                 }
             ]
@@ -201,11 +205,11 @@ class HandwritingProcessor(BaseProcessor):
                 
             except json.JSONDecodeError as e:
                 logger.error(f"Error al decodificar JSON de Claude: {e}")
-                return {field: "ERROR" for field in field_names}
+                raise ValueError("La respuesta no es un JSON válido")
             except Exception as e:
                 logger.error(f"Error al procesar respuesta de Claude: {e}", exc_info=True)
-                return {field: "ERROR" for field in field_names}
+                raise ValueError("La respuesta no es un JSON válido")
 
         except Exception as e:
             logger.error(f"Error en process_batch: {e}", exc_info=True)
-            return {field: "ERROR" for field in field_names}
+            raise
