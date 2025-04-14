@@ -44,17 +44,20 @@ def create_flask_app():
     
     return app
 
-def create_fastapi_app():
-    """Crear y configurar la aplicación FastAPI"""
-    app = FastAPI(title="SimplyExam API")
-    
+# Crear una instancia global de FastAPI
+app = FastAPI(title="SimplyExam API")
+
+def setup_app():
+    """Configurar la aplicación FastAPI"""
     # Configurar servido de archivos estáticos
     app.mount("/static", StaticFiles(directory=str(settings.STATIC_FOLDER)), name="static")
     
     # Incluir routers
     app.include_router(processing_router)
     
-    return app
+    # Crear y montar la aplicación Flask
+    flask_app = create_flask_app()
+    app.mount("/", WSGIMiddleware(flask_app))
 
 def initialize_processors():
     """Inicializar procesadores para que estén listos"""
@@ -72,27 +75,25 @@ def initialize_processors():
         logger.error(f"Error al inicializar procesadores: {e}", exc_info=True)
         raise
 
+# Configurar la aplicación
+initialize_processors()
+setup_app()
+
 def main():
     """Función principal para ejecutar la aplicación"""
     try:
-        # Inicializar procesadores
-        initialize_processors()
-        
-        # Crear aplicación FastAPI
-        fastapi_app = create_fastapi_app()
-        
-        # Crear aplicación Flask
-        flask_app = create_flask_app()
-        
-        # Montar Flask app en FastAPI
-        fastapi_app.mount("/", WSGIMiddleware(flask_app))
-        
         # Configuración del puerto
         port = int(os.environ.get('PORT', 5000))
         
         # Iniciar el servidor con uvicorn
         import uvicorn
-        uvicorn.run(fastapi_app, host='0.0.0.0', port=port, reload=True)  # Agregamos reload=True
+        uvicorn.run(
+            "app.main:app",  # Ruta de importación a la instancia de FastAPI
+            host='0.0.0.0',
+            port=port,
+            reload=True,
+            reload_dirs=["app"]  # Solo observar cambios en el directorio app
+        )
         
     except Exception as e:
         logger.error(f"Error al iniciar la aplicación: {e}", exc_info=True)
