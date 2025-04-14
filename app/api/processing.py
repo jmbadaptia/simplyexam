@@ -37,26 +37,37 @@ async def overlay_zones(
         image_path = session.image_path
         zones_info = session.zones_info
 
+        # Asegurarnos de que el directorio de resultados existe
+        os.makedirs(settings.RESULTS_FOLDER, exist_ok=True)
+
+        # Generar nombre único para la imagen de resultados
+        result_filename = f"overlay_{session_id}.png"
+        result_path = os.path.join(settings.RESULTS_FOLDER, result_filename)
+
+        # Generar imagen con zonas superpuestas
         result_path = overlay_zones_on_image(
             image_path,
             zones_info,
             opacity=opacity,
-            draw_labels=draw_labels
+            draw_labels=draw_labels,
+            output_path=result_path
         )
 
         # Guardar la ruta en la sesión
         session.overlay_path = result_path
         session.add_completed_step('overlay')
 
-        # Obtener la ruta relativa para el enlace
-        relative_path = os.path.relpath(result_path, settings.STATIC_FOLDER)
-        image_url = f"/static/{relative_path.replace(os.sep, '/')}"
+        # Construir la URL para acceder a la imagen
+        image_url = f"/static/results/{result_filename}"
+
+        logger.info(f"Imagen generada en: {result_path}")
+        logger.info(f"URL de la imagen: {image_url}")
 
         return {
             'success': True,
             'message': "Zonas superpuestas correctamente",
             'image_url': image_url,
-            'result_filename': os.path.basename(result_path)
+            'result_filename': result_filename
         }
 
     except Exception as e:

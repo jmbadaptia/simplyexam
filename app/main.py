@@ -4,6 +4,7 @@ import logging
 from flask import Flask
 from fastapi import FastAPI
 from fastapi.middleware.wsgi import WSGIMiddleware
+from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 
 # Cargar variables de entorno antes de importar otros módulos
@@ -26,7 +27,7 @@ from app.core.processors.mark import MarkProcessor
 def create_flask_app():
     """Crear y configurar la aplicación Flask"""
     app = Flask(__name__, 
-                static_folder=str(settings.STATIC_FOLDER),
+                static_folder=None,  # Desactivamos el servido de estáticos en Flask
                 template_folder=str(settings.TEMPLATE_FOLDER))
     
     # Configuración de la aplicación
@@ -46,6 +47,9 @@ def create_flask_app():
 def create_fastapi_app():
     """Crear y configurar la aplicación FastAPI"""
     app = FastAPI(title="SimplyExam API")
+    
+    # Configurar servido de archivos estáticos
+    app.mount("/static", StaticFiles(directory=str(settings.STATIC_FOLDER)), name="static")
     
     # Incluir routers
     app.include_router(processing_router)
@@ -88,7 +92,7 @@ def main():
         
         # Iniciar el servidor con uvicorn
         import uvicorn
-        uvicorn.run(fastapi_app, host='0.0.0.0', port=port)
+        uvicorn.run(fastapi_app, host='0.0.0.0', port=port, reload=True)  # Agregamos reload=True
         
     except Exception as e:
         logger.error(f"Error al iniciar la aplicación: {e}", exc_info=True)
