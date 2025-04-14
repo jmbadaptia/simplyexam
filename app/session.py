@@ -20,6 +20,7 @@ class Session:
         self.overlay_path = None
         self.completed_steps = []
         self.results = {}
+        self.rois = {}  # Diccionario para almacenar las ROIs
         logger.debug(f"Nueva sesión inicializada con ID: {self.id}")
         
     def update(self, **kwargs):
@@ -48,7 +49,8 @@ class Session:
             'created_at': self.created_at,
             'text_fields': self.text_fields,
             'mark_fields': self.mark_fields,
-            'completed_steps': self.completed_steps
+            'completed_steps': self.completed_steps,
+            'rois': self.rois
         }
 
 # Almacén de sesiones

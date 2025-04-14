@@ -1,0 +1,5 @@
+[33mcommit d84e5f16d53e103cd19aee79869a708ced6b7529[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m)[m
+Author: JMB <jmbernal@adaptia.org>
+Date:   Mon Apr 14 18:58:56 2025 +0200
+
+    fix: Corregir envío de campos seleccionados como JSON en el frontend

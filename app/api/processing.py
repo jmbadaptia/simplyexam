@@ -53,8 +53,26 @@ async def overlay_zones(
             output_path=result_path
         )
 
-        # Guardar la ruta en la sesión
+        # Guardar las ROIs en la sesión
+        rois = {}
+        for zone in zones_info:
+            if not isinstance(zone, dict) or 'name' not in zone:
+                continue
+                
+            field_name = zone['name']
+            x = int(zone.get('left', 0))
+            y = int(zone.get('top', 0))
+            w = int(zone.get('width', 0))
+            h = int(zone.get('height', 0))
+            
+            if x < 0 or y < 0 or w <= 0 or h <= 0:
+                continue
+                
+            rois[field_name] = [x, y, w, h]
+
+        # Guardar la ruta y las ROIs en la sesión
         session.overlay_path = result_path
+        session.rois = rois
         session.add_completed_step('overlay')
 
         # Construir la URL para acceder a la imagen
@@ -64,6 +82,7 @@ async def overlay_zones(
 
         logger.info(f"Imagen generada en: {result_path}")
         logger.info(f"URL de la imagen: {image_url}")
+        logger.info(f"ROIs guardadas: {list(rois.keys())}")
 
         return {
             'success': True,
