@@ -7,6 +7,8 @@ from flask import Blueprint, request, jsonify
 from app.config import settings
 from app.core.utils.file_utils import allowed_file, is_mark_field
 from app.session import create_session, get_session
+from pdf2image import convert_from_path
+import tempfile
 
 logger = logging.getLogger(__name__)
 
@@ -105,15 +107,29 @@ def upload_pdf():
         
         # Si es PDF, convertir a imagen
         if is_pdf:
-            # Aquí deberías implementar la conversión de PDF a imagen
-            # Por ahora, devolver error
-            return jsonify({'error': 'Procesamiento de PDF no implementado aún'}), 501
+            try:
+                # Convertir primera página del PDF a imagen
+                images = convert_from_path(pdf_path, first_page=1, last_page=1)
+                if not images:
+                    return jsonify({'error': 'No se pudo extraer imagen del PDF'}), 500
+                
+                # Guardar la primera página como imagen
+                image_filename = pdf_filename.rsplit('.', 1)[0] + '.jpg'
+                image_path = os.path.join(settings.UPLOAD_FOLDER, image_filename)
+                images[0].save(image_path, 'JPEG')
+                
+                # Eliminar el PDF original ya que tenemos la imagen
+                os.remove(pdf_path)
+                
+            except Exception as e:
+                logger.error(f"Error al convertir PDF: {e}", exc_info=True)
+                return jsonify({'error': 'Error al procesar el PDF'}), 500
         else:
             image_path = pdf_path
         
         # Actualizar datos de sesión
         session.update(
-            pdf_path=pdf_path,
+            pdf_path=pdf_path if not is_pdf else None,
             image_path=image_path,
             is_pdf=is_pdf
         )
