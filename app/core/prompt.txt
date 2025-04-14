@@ -1,0 +1,50 @@
+Analiza el documento PDF proporcionado y extrae la información de los siguientes campos manuscritos:
+
+{fields}
+
+Para cada campo, sigue estas instrucciones:
+1. Lee cuidadosamente el texto manuscrito en la zona indicada
+2. Si el campo está vacío o no se puede leer claramente, devuelve "NO_RECONOCIDO"
+3. Para fechas, usa el formato DD/MM/YYYY
+4. Para DNI, devuelve solo los números sin espacios ni guiones
+
+Responde ÚNICAMENTE con un JSON válido sin explicaciones, comentarios o texto adicional antes o después. 
+Utiliza esta estructura para el JSON:
+{
+    "campos": [
+        {
+            "nombre": "NOMBRE_DEL_CAMPO",
+            "valor": "VALOR_RECONOCIDO"
+        }
+    ]
+}
+
+Ejemplo de respuesta:
+{
+    "campos": [
+        {
+            "nombre": "APELLIDO1",
+            "valor": "GARCIA"
+        },
+        {
+            "nombre": "APELLIDO2",
+            "valor": "LOPEZ"
+        },
+        {
+            "nombre": "NOMBRE",
+            "valor": "JUAN"
+        },
+        {
+            "nombre": "DNI",
+            "valor": "12345678A"
+        },
+        {
+            "nombre": "FECHA",
+            "valor": "14/04/2025"
+        },
+        {
+            "nombre": "PUESTO",
+            "valor": "ANALISTA"
+        }
+    ]
+} 
