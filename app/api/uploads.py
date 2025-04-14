@@ -108,15 +108,21 @@ def upload_pdf():
         # Si es PDF, convertir a imagen
         if is_pdf:
             try:
-                # Convertir primera página del PDF a imagen
-                images = convert_from_path(pdf_path, first_page=1, last_page=1)
+                # Convertir primera página del PDF a imagen con tamaño y DPI específicos
+                images = convert_from_path(
+                    pdf_path,
+                    first_page=1,
+                    last_page=1,
+                    size=(1786, 2526),  # Tamaño específico
+                    dpi=96  # DPI específico
+                )
                 if not images:
                     return jsonify({'error': 'No se pudo extraer imagen del PDF'}), 500
                 
                 # Guardar la primera página como imagen
                 image_filename = pdf_filename.rsplit('.', 1)[0] + '.jpg'
                 image_path = os.path.join(settings.UPLOAD_FOLDER, image_filename)
-                images[0].save(image_path, 'JPEG')
+                images[0].save(image_path, 'JPEG', quality=95)  # Alta calidad
                 
                 # Eliminar el PDF original ya que tenemos la imagen
                 os.remove(pdf_path)

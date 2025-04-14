@@ -20,17 +20,23 @@ def allowed_file(filename, allowed_extensions=None):
         allowed_extensions = settings.ALLOWED_EXTENSIONS
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in allowed_extensions
 
-def is_mark_field(field_name):
-    """Determinar si un campo es una marca de respuesta
-    
-    Args:
-        field_name: Nombre del campo a verificar
-        
-    Returns:
-        bool: True si el campo es una marca de respuesta, False en caso contrario
+def is_mark_field(field_name: str) -> bool:
     """
-    pattern = r'^\d+[A-Z]$'
-    return bool(re.match(pattern, field_name.upper()))
+    Determina si un campo es de tipo marca o texto basado en su nombre.
+    Los campos de texto son:
+    - DNI (caso especial)
+    - Campos con nombre de más de 4 caracteres
+    """
+    # Caso especial para DNI
+    if field_name.upper() == 'DNI':
+        return False
+        
+    # Los campos con nombre largo (> 4 caracteres) son de texto
+    if len(field_name) > 4:
+        return False
+        
+    # El resto son campos de marca
+    return True
 
 def create_unique_filename(original_filename, prefix=''):
     """Crear un nombre de archivo único con un prefijo opcional
