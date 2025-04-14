@@ -41,9 +41,10 @@ def upload_json():
         with open(json_path, 'r') as f:
             zones_info = json.load(f)
         
-        # Clasificar campos
+        # Clasificar campos y extraer ROIs
         text_fields = set()
         mark_fields = set()
+        rois = {}
         
         for zone in zones_info:
             if not isinstance(zone, dict) or 'name' not in zone:
@@ -54,13 +55,25 @@ def upload_json():
                 mark_fields.add(field_name)
             else:
                 text_fields.add(field_name)
+            
+            # Extraer coordenadas de la ROI
+            x = int(zone.get('left', 0))
+            y = int(zone.get('top', 0))
+            w = int(zone.get('width', 0))
+            h = int(zone.get('height', 0))
+            
+            if x >= 0 and y >= 0 and w > 0 and h > 0:
+                rois[field_name] = [x, y, w, h]
         
         # Actualizar sesión
         session.json_path = json_path
         session.zones_info = zones_info
         session.text_fields = list(text_fields)
         session.mark_fields = list(mark_fields)
+        session.rois = rois
         session.add_completed_step('json_upload')
+        
+        logger.info(f"ROIs extraídas: {list(rois.keys())}")
         
         return jsonify({
             'success': True,
