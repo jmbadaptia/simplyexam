@@ -263,9 +263,7 @@
 
             const formData = new FormData();
             formData.append('session_id', sessionId);
-            selectedFields.forEach(field => {
-                formData.append('selected_fields[]', field);
-            });
+            formData.append('fields', JSON.stringify(selectedFields));
 
             try {
                 results.innerHTML = '<p>Procesando... esto puede tomar unos momentos.</p>';
