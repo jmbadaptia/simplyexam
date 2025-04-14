@@ -58,9 +58,14 @@ class HandwritingProcessor(BaseProcessor):
     def process_text(self, roi) -> str:
         """Procesar una ROI para extraer texto manuscrito"""
         try:
-            # Convertir ROI a base64
-            _, buffer = cv2.imencode('.jpg', roi)
-            base64_image = base64.b64encode(buffer).decode('utf-8')
+            # Obtener la sesión y el PDF original
+            session = SessionManager.get_session(self._session_id)
+            if not session or not session.image_path:
+                raise ValueError("No hay PDF cargado en la sesión")
+
+            # Leer el PDF original
+            with open(session.image_path, "rb") as pdf_file:
+                pdf_base64 = base64.b64encode(pdf_file.read()).decode('utf-8')
 
             # Crear mensaje para Claude
             message = {
@@ -72,14 +77,14 @@ class HandwritingProcessor(BaseProcessor):
                         "content": [
                             {
                                 "type": "text",
-                                "text": "Analiza esta imagen y extrae el texto manuscrito que contiene. La imagen muestra un número o texto manuscrito. Por favor, devuelve solo el texto reconocido, sin explicaciones adicionales."
+                                "text": "Analiza este PDF y extrae el texto manuscrito que contiene..."
                             },
                             {
-                                "type": "image",
+                                "type": "document",
                                 "source": {
                                     "type": "base64",
-                                    "media_type": "image/jpeg",
-                                    "data": base64_image
+                                    "media_type": "application/pdf",
+                                    "data": pdf_base64
                                 }
                             }
                         ]
@@ -136,27 +141,15 @@ class HandwritingProcessor(BaseProcessor):
             # Verificar que tenemos una sesión válida
             session = SessionManager.get_session(session_id)
             if not session or not session.image_path:
-                raise ValueError("No hay imagen cargada en la sesión")
+                raise ValueError("No hay PDF cargado en la sesión")
 
-            # Leer el archivo y detectar su tipo
-            with open(session.image_path, "rb") as file:
-                file_content = file.read()
-                file_base64 = base64.b64encode(file_content).decode('utf-8')
-                
-                # Detectar el tipo de archivo basado en el contenido
-                if file_content.startswith(b'\x89PNG\r\n\x1a\n'):
-                    media_type = "image/png"
-                elif file_content.startswith(b'\xff\xd8\xff'):
-                    media_type = "image/jpeg"
-                elif file_content.startswith(b'%PDF'):
-                    media_type = "application/pdf"
-                else:
-                    raise ValueError("Tipo de archivo no soportado")
+            # Leer el PDF original
+            with open(session.image_path, "rb") as pdf_file:
+                pdf_base64 = base64.b64encode(pdf_file.read()).decode('utf-8')
 
-            logger.info(f"Detectado tipo de archivo: {media_type}")
-            logger.info(f"Longitud del base64: {len(file_base64)}")
+            logger.info(f"Longitud del PDF en base64: {len(pdf_base64)}")
 
-            # Construir el mensaje con el tipo de archivo correcto
+            # Construir el mensaje con el PDF original
             message_content = [
                 {
                     "type": "text",
@@ -166,8 +159,8 @@ class HandwritingProcessor(BaseProcessor):
                     "type": "document",
                     "source": {
                         "type": "base64",
-                        "media_type": media_type,
-                        "data": file_base64
+                        "media_type": "application/pdf",
+                        "data": pdf_base64
                     }
                 }
             ]
