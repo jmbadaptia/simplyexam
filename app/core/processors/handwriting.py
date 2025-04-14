@@ -138,7 +138,17 @@ class HandwritingProcessor(BaseProcessor):
 
             # Obtener la ruta del PDF de la sesión
             from app.session import get_session
-            session = get_session(field_names[0])  # Usamos el primer campo como ID de sesión
+            from fastapi import Request
+            from fastapi.requests import Request
+            
+            # Obtener el ID de sesión de la petición HTTP
+            request = Request()
+            session_id = request.headers.get('X-Session-ID')
+            if not session_id:
+                logger.error("No se encontró el ID de sesión en los headers")
+                return {field: "ERROR" for field in field_names}
+                
+            session = get_session(session_id)
             if not session or not session.pdf_path:
                 logger.error("No hay PDF cargado en la sesión")
                 return {field: "ERROR" for field in field_names}
