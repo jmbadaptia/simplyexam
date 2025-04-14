@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistema de Corrección OMR</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .card {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 15px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .preview {
+            max-width: 100%;
+            margin-top: 20px;
+        }
+        .fields-container {
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            padding: 10px;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Sistema de Corrección OMR</h1>
+            <p>Reconocimiento de marcas ópticas y texto manuscrito</p>
+        </div>
+
+        <div class="card">
+            <h2>Paso 1: Cargar archivo JSON de zonas</h2>
+            <div class="form-group">
+                <label for="jsonFile">Selecciona el archivo JSON con la definición de zonas:</label>
+                <input type="file" id="jsonFile" accept=".json">
+            </div>
+            <button id="uploadJsonBtn">Cargar JSON</button>
+            <div id="jsonResult"></div>
+        </div>
+
+        <div class="card">
+            <h2>Paso 2: Cargar imagen de examen</h2>
+            <div class="form-group">
+                <label for="imageFile">Selecciona la imagen del examen:</label>
+                <input type="file" id="imageFile" accept=".jpg, .jpeg, .png, .pdf">
+            </div>
+            <button id="uploadImageBtn" disabled>Cargar Imagen</button>
+            <div id="imagePreview" class="preview"></div>
+        </div>
+
+        <div class="card">
+            <h2>Paso 3: Superposición de zonas</h2>
+            <div class="form-group">
+                <label for="opacity">Opacidad de las zonas:</label>
+                <input type="range" id="opacity" min="0" max="1" step="0.1" value="0.4">
+            </div>
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" id="drawLabels" checked>
+                    Mostrar etiquetas de zonas
+                </label>
+            </div>
+            <button id="overlayBtn" disabled>Superponer Zonas</button>
+            <div id="overlayPreview" class="preview"></div>
+        </div>
+
+        <div class="card">
+            <h2>Paso 4: Reconocimiento de campos</h2>
+            <div class="form-group">
+                <label>Selecciona los campos a reconocer:</label>
+                <div id="fieldsList" class="fields-container">
+                    <p>Primero carga el archivo JSON de zonas...</p>
+                </div>
+            </div>
+            <button id="recognizeBtn" disabled>Reconocer Campos</button>
+            <div id="results"></div>
+        </div>
+    </div>
+
+    <script>
+        // Variables globales
+        let sessionId = null;
+        let textFields = [];
+        let markFields = [];
+
+        // Referencias a los elementos del DOM
+        const jsonFileInput = document.getElementById('jsonFile');
+        const imageFileInput = document.getElementById('imageFile');
+        const uploadJsonBtn = document.getElementById('uploadJsonBtn');
+        const uploadImageBtn = document.getElementById('uploadImageBtn');
+        const overlayBtn = document.getElementById('overlayBtn');
+        const recognizeBtn = document.getElementById('recognizeBtn');
+        const jsonResult = document.getElementById('jsonResult');
+        const imagePreview = document.getElementById('imagePreview');
+        const overlayPreview = document.getElementById('overlayPreview');
+        const fieldsList = document.getElementById('fieldsList');
+        const results = document.getElementById('results');
+        const opacitySlider = document.getElementById('opacity');
+        const drawLabelsCheckbox = document.getElementById('drawLabels');
+
+        // Evento para subir el archivo JSON
+        uploadJsonBtn.addEventListener('click', async () => {
+            if (!jsonFileInput.files.length) {
+                alert('Por favor, selecciona un archivo JSON.');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('json_file', jsonFileInput.files[0]);
+
+            try {
+                const response = await fetch('/api/upload-json', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    sessionId = data.session_id;
+                    textFields = data.text_fields || [];
+                    markFields = data.mark_fields || [];
+                    
+                    jsonResult.innerHTML = `<p style="color: green;">JSON cargado correctamente. ID de sesión: ${sessionId}</p>`;
+                    uploadImageBtn.disabled = false;
+                    
+                    // Mostrar los campos disponibles
+                    updateFieldsList();
+                } else {
+                    jsonResult.innerHTML = `<p style="color: red;">Error: ${data.error}</p>`;
+                }
+            } catch (error) {
+                jsonResult.innerHTML = `<p style="color: red;">Error: ${error.message}</p>`;
+            }
+        });
+
+        // Evento para subir la imagen
+        uploadImageBtn.addEventListener('click', async () => {
+            if (!sessionId) {
+                alert('Primero debes cargar el archivo JSON.');
+                return;
+            }
+
+            if (!imageFileInput.files.length) {
+                alert('Por favor, selecciona una imagen.');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('session_id', sessionId);
+            formData.append('pdf_file', imageFileInput.files[0]);
+
+            try {
+                const response = await fetch('/api/upload-pdf', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    imagePreview.innerHTML = `<img src="data:image/jpeg;base64,${data.image_base64}" style="max-width: 100%;">`;
+                    overlayBtn.disabled = false;
+                } else {
+                    imagePreview.innerHTML = `<p style="color: red;">Error: ${data.error}</p>`;
+                }
+            } catch (error) {
+                imagePreview.innerHTML = `<p style="color: red;">Error: ${error.message}</p>`;
+            }
+        });
+
+        // Evento para superponer zonas
+        overlayBtn.addEventListener('click', async () => {
+            if (!sessionId) {
+                alert('Primero debes cargar el archivo JSON e imagen.');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('session_id', sessionId);
+            formData.append('opacity', opacitySlider.value);
+            formData.append('draw_labels', drawLabelsCheckbox.checked);
+
+            try {
+                const response = await fetch('/api/overlay-zones', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    overlayPreview.innerHTML = `<img src="data:image/jpeg;base64,${data.result_base64}" style="max-width: 100%;">`;
+                    recognizeBtn.disabled = false;
+                } else {
+                    overlayPreview.innerHTML = `<p style="color: red;">Error: ${data.error}</p>`;
+                }
+            } catch (error) {
+                overlayPreview.innerHTML = `<p style="color: red;">Error: ${error.message}</p>`;
+            }
+        });
+
+        // Evento para reconocimiento de campos
+        recognizeBtn.addEventListener('click', async () => {
+            if (!sessionId) {
+                alert('Primero debes completar los pasos anteriores.');
+                return;
+            }
+
+            // Obtener los campos seleccionados
+            const selectedFields = Array.from(document.querySelectorAll('#fieldsList input[type="checkbox"]:checked')).map(cb => cb.value);
+            
+            if (selectedFields.length === 0) {
+                alert('Por favor, selecciona al menos un campo para reconocer.');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('session_id', sessionId);
+            selectedFields.forEach(field => {
+                formData.append('selected_fields[]', field);
+            });
+
+            try {
+                results.innerHTML = '<p>Procesando... esto puede tomar unos momentos.</p>';
+                
+                const response = await fetch('/api/recognize-text', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    // Formatear y mostrar resultados
+                    displayResults(data.results);
+                } else {
+                    results.innerHTML = `<p style="color: red;">Error: ${data.error}</p>`;
+                }
+            } catch (error) {
+                results.innerHTML = `<p style="color: red;">Error: ${error.message}</p>`;
+            }
+        });
+
+        // Función para actualizar la lista de campos
+        function updateFieldsList() {
+            const allFields = [...textFields, ...markFields].sort();
+            
+            if (allFields.length === 0) {
+                fieldsList.innerHTML = '<p>No se encontraron campos en el JSON.</p>';
+                return;
+            }
+            
+            let html = '';
+            
+            if (textFields.length > 0) {
+                html += '<h3>Campos de texto:</h3>';
+                textFields.forEach(field => {
+                    html += `
+                        <div>
+                            <label>
+                                <input type="checkbox" value="${field}"> ${field}
+                            </label>
+                        </div>
+                    `;
+                });
+            }
+            
+            if (markFields.length > 0) {
+                html += '<h3>Campos de marca:</h3>';
+                markFields.forEach(field => {
+                    html += `
+                        <div>
+                            <label>
+                                <input type="checkbox" value="${field}"> ${field}
+                            </label>
+                        </div>
+                    `;
+                });
+            }
+            
+            fieldsList.innerHTML = html;
+        }
+
+        // Función para mostrar los resultados
+        function displayResults(results) {
+            let html = '<h3>Resultados del reconocimiento:</h3>';
+            html += '<div style="overflow-x: auto;"><table border="1" cellpadding="8" style="border-collapse: collapse;">';
+            html += '<tr><th>Campo</th><th>Valor</th></tr>';
+            
+            // Resultados de texto
+            for (const [field, value] of Object.entries(results)) {
+                if (field !== 'marks') {
+                    html += `<tr><td>${field}</td><td>${value}</td></tr>`;
+                }
+            }
+            
+            html += '</table></div>';
+            
+            // Información detallada sobre marcas
+            if (results.marks && Object.keys(results.marks).length > 0) {
+                html += '<h3>Detalles de marcas:</h3>';
+                html += '<div style="overflow-x: auto;"><table border="1" cellpadding="8" style="border-collapse: collapse;">';
+                html += '<tr><th>Campo</th><th>Estado</th><th>Porcentaje</th></tr>';
+                
+                for (const [field, info] of Object.entries(results.marks)) {
+                    html += `<tr>
+                        <td>${field}</td>
+                        <td>${info.marked ? '✓ MARCADO' : '✗ NO MARCADO'}</td>
+                        <td>${info.percentage.toFixed(2)}%</td>
+                    </tr>`;
+                }
+                
+                html += '</table></div>';
+            }
+            
+            results.innerHTML = html;
+        }
+    </script>
+</body>
+</html>

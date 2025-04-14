@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Editor Básico de Plantillas OMR</title>
+  <link rel="stylesheet" href="js/editor.css">
+</head>
+<body>
+  <div class="controls">
+    <h2>Editor Plantillas OMR</h2>
+    
+    <label for="imageLoader">📷 Cargar imagen de plantilla</label>
+    <input type="file" id="imageLoader" accept="image/*">
+
+    <label for="jsonLoader">📂 Cargar zonas desde archivo JSON</label>
+    <input type="file" id="jsonLoader" accept="application/json">
+
+    <div class="main-actions">
+      <button id="undoBtn" onclick="undoLastAction()" disabled>↩️ Deshacer</button>
+      <button onclick="downloadZones()">💾 Guardar zonas</button>
+    </div>
+    
+    <!-- Sección de Generación Automática DNI -->
+    <div class="generation-section">
+      <h3>🆔 Generación DNI</h3>
+      <p>Dibuja primero D00, D10 y D01</p>
+      <button onclick="generateDNIGrid()">Generar Rejilla DNI</button>
+      <button onclick="visualizeDNI()">Visualizar DNI</button>
+    </div>
+    
+    <!-- Sección de Generación Automática Respuestas -->
+    <div class="generation-section">
+      <h3>🔢 Generación Respuestas</h3>
+      <p>Dibuja 1A, 1B, 1C y 2A</p>
+      <label>Preguntas: <input type="number" id="numQuestions" value="10" min="1" style="width:50px"></label>
+      <button onclick="generateAnswersGrid()">Generar Respuestas</button>
+    </div>
+    
+    <!-- Sección de Generación Automática Rejilla Completa -->
+    <div class="generation-section">
+      <h3>🔢 Generación Rejilla Completa (50 preguntas)</h3>
+      <p>Requisitos: Dibuja manualmente 1A, 1B, 2A, 16A, 31A y 46A</p>
+      <button onclick="generateCompleteAnswersGrid()">Generar Rejilla Completa</button>
+    </div>
+
+    <h3>Zonas definidas:</h3>
+    <div id="zoneList"></div>
+  </div>
+
+  <div id="canvas-container">
+    <canvas id="canvas"></canvas>
+    <div class="tooltip" id="tooltip"></div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.0/fabric.min.js"></script>
+  <script src="js/editor.js"></script>
+  <script src="js/zone-manager.js"></script>
+  <script src="js/grid-generator.js"></script>
+</body>
+</html>
