@@ -46,9 +46,22 @@ Thumbs.db
 local_settings.py
 db.sqlite3
 
-# Project specific
+# Project specific uploads
 uploads/*
 !uploads/.gitkeep
+
+# Static directory structure
+static/uploads/*
+static/temp/*
+static/generated/*
+!static/uploads/.gitkeep
+!static/temp/.gitkeep
+!static/generated/.gitkeep
+
+# Keep static assets
+!static/css/
+!static/js/
+!static/img/
 
 # Docker
 .docker/
