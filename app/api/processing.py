@@ -10,6 +10,8 @@ from app.config import settings
 from app.core.utils.image_utils import overlay_zones_on_image
 from app.session import get_session, Session
 from app.core.processors.handwriting import HandwritingProcessor
+from fastapi import File, UploadFile
+from fastapi.encoders import jsonable_encoder
 
 logger = logging.getLogger(__name__)
 
@@ -103,10 +105,19 @@ async def get_fields(
 async def recognize_text(
     request: Request,
     session_id: str = Form(...),
-    fields: List[str] = Form(...)
+    fields: str = Form(...)  # Recibimos los campos como un string JSON
 ):
     """Reconocer texto en las ROIs seleccionadas"""
     try:
+        # Convertir el string JSON de campos a lista
+        try:
+            fields_list = json.loads(fields)
+            if not isinstance(fields_list, list):
+                fields_list = [fields_list]
+        except json.JSONDecodeError:
+            # Si no es JSON válido, asumimos que es un solo campo
+            fields_list = [fields]
+
         session = get_session(session_id)
         if not session:
             raise HTTPException(status_code=400, detail="Sesión no válida")
@@ -114,7 +125,7 @@ async def recognize_text(
         if not session.image_path:
             raise HTTPException(status_code=400, detail="No hay imagen cargada")
 
-        if not fields:
+        if not fields_list:
             raise HTTPException(status_code=400, detail="No se seleccionaron campos")
 
         # Leer imagen
@@ -129,7 +140,7 @@ async def recognize_text(
         # Obtener ROIs
         rois = []
         if hasattr(session, 'rois'):
-            for field in fields:
+            for field in fields_list:
                 if field in session.rois:
                     roi_coords = session.rois[field]
                     x, y, w, h = map(int, roi_coords)
@@ -144,9 +155,9 @@ async def recognize_text(
 
         # Procesar texto
         processor = HandwritingProcessor()
-        results = processor.process_batch(rois, fields)
+        results = processor.process_batch(rois, fields_list)
 
-        return {"success": True, "results": results}
+        return JSONResponse(content={"success": True, "results": jsonable_encoder(results)})
 
     except Exception as e:
         logger.error(f"Error en reconocimiento de texto: {e}", exc_info=True)
