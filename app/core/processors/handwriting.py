@@ -101,7 +101,7 @@ class HandwritingProcessor(BaseProcessor):
             logger.error(f"Error procesando texto: {e}", exc_info=True)
             return "ERROR"
 
-    def process(self, image, zones):
+    def process(self, image, zones, session_id: str):
         """Implementación del método abstracto"""
         # Extraer ROIs del texto
         rois = []
@@ -127,9 +127,9 @@ class HandwritingProcessor(BaseProcessor):
             field_names.append(zone['name'])
         
         # Procesar las ROIs
-        return self.process_batch(rois, field_names)
+        return self.process_batch(rois, field_names, session_id)
 
-    def process_batch(self, rois: List[np.ndarray], field_names: List[str]) -> Dict[str, str]:
+    def process_batch(self, rois: List[np.ndarray], field_names: List[str], session_id: str) -> Dict[str, str]:
         """Procesa un lote de ROIs y extrae el texto usando Claude"""
         try:
             if not rois or not field_names:
@@ -138,16 +138,6 @@ class HandwritingProcessor(BaseProcessor):
 
             # Obtener la ruta del PDF de la sesión
             from app.session import get_session
-            from fastapi import Request
-            from fastapi.requests import Request
-            
-            # Obtener el ID de sesión de la petición HTTP
-            request = Request()
-            session_id = request.headers.get('X-Session-ID')
-            if not session_id:
-                logger.error("No se encontró el ID de sesión en los headers")
-                return {field: "ERROR" for field in field_names}
-                
             session = get_session(session_id)
             if not session or not session.pdf_path:
                 logger.error("No hay PDF cargado en la sesión")
