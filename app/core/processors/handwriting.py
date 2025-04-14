@@ -137,7 +137,7 @@ class HandwritingProcessor(BaseProcessor):
                 return {}
 
             # Obtener la ruta del PDF de la sesión
-            from app.core.session import Session
+            from app.session import Session
             session = Session.get_current()
             if not session or not session.pdf_path:
                 logger.error("No hay PDF cargado en la sesión")
