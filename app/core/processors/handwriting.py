@@ -18,6 +18,20 @@ class HandwritingProcessor(BaseProcessor):
         self._text_fields = set()
         self._claude_results = None
         self._initialize_client()
+        self._load_prompt()
+
+    def _load_prompt(self):
+        """Cargar el prompt desde el archivo"""
+        try:
+            # Corregir la ruta para buscar en app/core/prompt.txt
+            prompt_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'prompt.txt')
+            logger.info(f"Intentando cargar prompt desde: {prompt_path}")
+            with open(prompt_path, 'r', encoding='utf-8') as f:
+                self._prompt_template = f.read()
+            logger.info("Prompt cargado exitosamente")
+        except Exception as e:
+            logger.error(f"Error al cargar el prompt: {e}", exc_info=True)
+            raise
 
     def _initialize_client(self):
         """Inicializar el cliente de Anthropic"""
@@ -122,43 +136,40 @@ class HandwritingProcessor(BaseProcessor):
                 logger.warning("No hay ROIs o nombres de campos para procesar")
                 return {}
 
-            # Preparar imágenes en base64
-            images_content = []
-            for roi in rois:
-                # Convertir imagen a base64
-                _, buffer = cv2.imencode('.png', roi)
-                img_base64 = base64.b64encode(buffer).decode('utf-8')
-                images_content.append(img_base64)
+            # Obtener la ruta del PDF de la sesión
+            from app.core.session import Session
+            session = Session.get_current()
+            if not session or not session.pdf_path:
+                logger.error("No hay PDF cargado en la sesión")
+                return {field: "ERROR" for field in field_names}
 
-            # Construir mensaje para Claude
-            prompt = {
-                "task": "text_extraction",
-                "instructions": "Por favor analiza las siguientes imágenes y extrae el texto manuscrito que contienen. Responde en formato JSON con el texto extraído para cada campo.",
-                "fields": field_names
-            }
+            # Leer el PDF y convertirlo a base64
+            try:
+                with open(session.pdf_path, "rb") as pdf_file:
+                    pdf_base64 = base64.b64encode(pdf_file.read()).decode('utf-8')
+            except Exception as e:
+                logger.error(f"Error al leer el PDF: {e}", exc_info=True)
+                return {field: "ERROR" for field in field_names}
 
             # Construir el contenido del mensaje
             message_content = [
                 {
                     "type": "text",
-                    "text": str(prompt)
+                    "text": self._prompt_template.format(fields=", ".join(field_names))
+                },
+                {
+                    "type": "document",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "application/pdf",
+                        "data": pdf_base64
+                    }
                 }
             ]
 
-            # Agregar cada imagen al contenido
-            for img_base64 in images_content:
-                message_content.append({
-                    "type": "image",
-                    "source": {
-                        "type": "base64",
-                        "media_type": "image/png",
-                        "data": img_base64
-                    }
-                })
-
             # Enviar mensaje a Claude
             response = self._client.messages.create(
-                model="claude-3-opus-20240229",
+                model="claude-3-7-sonnet-20250219",
                 max_tokens=1000,
                 messages=[{
                     "role": "user",
@@ -167,16 +178,27 @@ class HandwritingProcessor(BaseProcessor):
             )
 
             # Procesar respuesta
-            results = {}
             try:
                 response_text = response.content[0].text
-                results = eval(response_text)  # Convertir string JSON a dict
+                logger.info(f"Respuesta de Claude: {response_text}")
+                
+                # Convertir la respuesta a JSON
+                response_json = json.loads(response_text)
+                
+                # Convertir el formato de respuesta a un diccionario simple
+                results = {}
+                for campo in response_json.get("campos", []):
+                    results[campo["nombre"]] = campo["valor"]
+                
+                return results
+                
+            except json.JSONDecodeError as e:
+                logger.error(f"Error al decodificar JSON de Claude: {e}")
+                return {field: "ERROR" for field in field_names}
             except Exception as e:
                 logger.error(f"Error al procesar respuesta de Claude: {e}", exc_info=True)
-                results = {}
-
-            return results
+                return {field: "ERROR" for field in field_names}
 
         except Exception as e:
             logger.error(f"Error en process_batch: {e}", exc_info=True)
-            return {}
+            return {field: "ERROR" for field in field_names}
