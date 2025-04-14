@@ -118,6 +118,8 @@ async def recognize_text(
             # Si no es JSON válido, asumimos que es un solo campo
             fields_list = [fields]
 
+        logger.info(f"Campos recibidos: {fields_list}")
+
         session = get_session(session_id)
         if not session:
             raise HTTPException(status_code=400, detail="Sesión no válida")
@@ -139,16 +141,28 @@ async def recognize_text(
 
         # Obtener ROIs
         rois = []
-        if hasattr(session, 'rois'):
-            for field in fields_list:
-                if field in session.rois:
-                    roi_coords = session.rois[field]
-                    x, y, w, h = map(int, roi_coords)
-                    roi = image[y:y+h, x:x+w]
-                    if roi is not None and roi.size > 0:
-                        rois.append(roi)
-                    else:
-                        logger.warning(f"ROI inválida para el campo {field}")
+        roi_images = {}  # Diccionario para almacenar las imágenes en base64
+        
+        if not hasattr(session, 'rois'):
+            raise HTTPException(status_code=400, detail="No hay ROIs definidas en la sesión")
+            
+        logger.info(f"ROIs disponibles en sesión: {session.rois.keys()}")
+        
+        for field in fields_list:
+            if field in session.rois:
+                roi_coords = session.rois[field]
+                x, y, w, h = map(int, roi_coords)
+                roi = image[y:y+h, x:x+w]
+                if roi is not None and roi.size > 0:
+                    rois.append(roi)
+                    # Convertir ROI a base64
+                    _, buffer = cv2.imencode('.png', roi)
+                    roi_base64 = base64.b64encode(buffer).decode('utf-8')
+                    roi_images[field] = f"data:image/png;base64,{roi_base64}"
+                else:
+                    logger.warning(f"ROI inválida para el campo {field}")
+            else:
+                logger.warning(f"Campo {field} no encontrado en las ROIs disponibles")
 
         if not rois:
             raise HTTPException(status_code=400, detail="No se encontraron ROIs válidas")
@@ -157,7 +171,18 @@ async def recognize_text(
         processor = HandwritingProcessor()
         results = processor.process_batch(rois, fields_list)
 
-        return JSONResponse(content={"success": True, "results": jsonable_encoder(results)})
+        # Agregar las imágenes al resultado
+        response_data = {
+            "success": True,
+            "results": results,
+            "roi_images": roi_images,  # Incluir las imágenes de las ROIs
+            "debug_info": {
+                "fields_received": fields_list,
+                "rois_found": list(roi_images.keys())
+            }
+        }
+
+        return JSONResponse(content=jsonable_encoder(response_data))
 
     except Exception as e:
         logger.error(f"Error en reconocimiento de texto: {e}", exc_info=True)
