@@ -44,16 +44,18 @@ async def overlay_zones(
             draw_labels=draw_labels
         )
 
-        with open(result_path, 'rb') as img_file:
-            result_base64 = base64.b64encode(img_file.read()).decode('utf-8')
-
+        # Guardar la ruta en la sesión
         session.overlay_path = result_path
         session.add_completed_step('overlay')
+
+        # Obtener la ruta relativa para el enlace
+        relative_path = os.path.relpath(result_path, settings.STATIC_FOLDER)
+        image_url = f"/static/{relative_path.replace(os.sep, '/')}"
 
         return {
             'success': True,
             'message': "Zonas superpuestas correctamente",
-            'result_base64': result_base64,
+            'image_url': image_url,
             'result_filename': os.path.basename(result_path)
         }
 
