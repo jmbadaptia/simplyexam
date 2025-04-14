@@ -228,7 +228,10 @@
                 const data = await response.json();
 
                 if (data.success) {
-                    overlayPreview.innerHTML = `<img src="data:image/jpeg;base64,${data.result_base64}" style="max-width: 100%;">`;
+                    overlayPreview.innerHTML = `
+                        <p>Imagen generada correctamente:</p>
+                        <a href="${data.image_url}" target="_blank">Ver imagen con zonas superpuestas</a>
+                    `;
                     recognizeBtn.disabled = false;
                 } else {
                     overlayPreview.innerHTML = `<p style="color: red;">Error: ${data.error}</p>`;
