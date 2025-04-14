@@ -188,6 +188,8 @@
             formData.append('pdf_file', imageFileInput.files[0]);
 
             try {
+                imagePreview.innerHTML = '<p>Procesando... por favor espere.</p>';
+                
                 const response = await fetch('/api/upload-pdf', {
                     method: 'POST',
                     body: formData
@@ -196,7 +198,10 @@
                 const data = await response.json();
 
                 if (data.success) {
-                    imagePreview.innerHTML = `<img src="data:image/jpeg;base64,${data.image_base64}" style="max-width: 100%;">`;
+                    imagePreview.innerHTML = `
+                        <p>${data.message}</p>
+                        <a href="${data.image_url}" target="_blank">Ver imagen</a>
+                    `;
                     overlayBtn.disabled = false;
                     recognizeBtn.disabled = false;
                 } else {

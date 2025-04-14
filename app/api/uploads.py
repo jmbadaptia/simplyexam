@@ -155,6 +155,7 @@ def upload_pdf():
                 return jsonify({'error': f'Error al procesar el PDF: {str(e)}'}), 500
         else:
             image_path = pdf_path
+            image_filename = pdf_filename
         
         # Actualizar datos de sesión
         session.update(
@@ -164,15 +165,14 @@ def upload_pdf():
         )
         session.add_completed_step('pdf_upload')
         
-        # Leer la imagen para enviarla como base64
-        with open(image_path, 'rb') as img_file:
-            image_base64 = base64.b64encode(img_file.read()).decode('utf-8')
+        # Construir la URL relativa para la imagen
+        image_url = f"/static/uploads/{image_filename}"
         
         return jsonify({
             'success': True,
             'message': f"{'PDF convertido' if is_pdf else 'Imagen procesada'} correctamente",
-            'image_base64': image_base64,
-            'image_filename': os.path.basename(image_path),
+            'filename': image_filename,
+            'image_url': image_url,
             'ready_for_overlay': True
         })
         
