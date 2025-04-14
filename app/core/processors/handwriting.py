@@ -147,6 +147,7 @@ class HandwritingProcessor(BaseProcessor):
             try:
                 with open(session.image_path, "rb") as pdf_file:
                     pdf_base64 = base64.b64encode(pdf_file.read()).decode('utf-8')
+                logger.info(f"PDF convertido a base64, longitud: {len(pdf_base64)}")
             except Exception as e:
                 logger.error(f"Error al leer el PDF: {e}", exc_info=True)
                 return {field: "ERROR" for field in field_names}
@@ -167,15 +168,21 @@ class HandwritingProcessor(BaseProcessor):
                 }
             ]
 
+            # Construir la petición completa
+            request_data = {
+                "model": "claude-3-7-sonnet-20250219",
+                "max_tokens": 1000,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": message_content
+                    }
+                ]
+            }
+
+            logger.info("Enviando petición a Claude...")
             # Enviar mensaje a Claude
-            response = self._client.messages.create(
-                model="claude-3-7-sonnet-20250219",
-                max_tokens=1000,
-                messages=[{
-                    "role": "user",
-                    "content": message_content
-                }]
-            )
+            response = self._client.messages.create(**request_data)
 
             # Procesar respuesta
             try:
