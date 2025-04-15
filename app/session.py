@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 class Session:
     """Gestiona datos de sesión para un proceso de análisis OMR"""
-        
+    
     def __init__(self, id=None):
         self.id = id or str(uuid.uuid4())
         self.created_at = time.time()
@@ -16,12 +16,13 @@ class Session:
         self.text_fields = []
         self.mark_fields = []
         self.image_path = None
-        self.pdf_path = None  # Añadir esta línea
+        self.pdf_path = None  # Añadido atributo pdf_path
         self.is_pdf = False
         self.overlay_path = None
         self.completed_steps = []
         self.results = {}
         self.rois = {}  # Diccionario para almacenar las ROIs
+        logger.debug(f"Nueva sesión inicializada con ID: {self.id}")
         
     def update(self, **kwargs):
         """Actualiza atributos de la sesión"""
@@ -52,54 +53,3 @@ class Session:
             'completed_steps': self.completed_steps,
             'rois': self.rois
         }
-
-class SessionManager:
-    """Gestiona el almacenamiento y recuperación de sesiones"""
-    
-    _sessions: Dict[str, Session] = {}
-    
-    @classmethod
-    def create_session(cls) -> Session:
-        """Crea una nueva sesión"""
-        session = Session()
-        cls._sessions[session.id] = session
-        logger.info(f"Sesión creada: {session.id}")
-        logger.debug(f"Total de sesiones activas: {len(cls._sessions)}")
-        logger.debug(f"IDs de sesiones activas: {list(cls._sessions.keys())}")
-        return session
-    
-    @classmethod
-    def get_session(cls, session_id: str) -> Optional[Session]:
-        """Obtiene una sesión existente"""
-        session = cls._sessions.get(session_id)
-        if session is None:
-            logger.warning(f"Sesión no encontrada: {session_id}")
-            logger.debug(f"Total de sesiones activas: {len(cls._sessions)}")
-            logger.debug(f"IDs de sesiones activas: {list(cls._sessions.keys())}")
-        else:
-            logger.debug(f"Sesión encontrada: {session_id}")
-        return session
-    
-    @classmethod
-    def cleanup_sessions(cls, max_age=3600):
-        """Limpia sesiones antiguas"""
-        now = time.time()
-        to_delete = []
-        
-        for session_id, session in cls._sessions.items():
-            if (now - session.created_at) > max_age:
-                to_delete.append(session_id)
-                
-        for session_id in to_delete:
-            del cls._sessions[session_id]
-            
-        if to_delete:
-            logger.info(f"Limpiadas {len(to_delete)} sesiones antiguas")
-            logger.debug(f"Sesiones eliminadas: {to_delete}")
-            logger.debug(f"Sesiones restantes: {list(cls._sessions.keys())}")
-
-# Para compatibilidad con el código original
-sessions = SessionManager._sessions
-create_session = SessionManager.create_session
-get_session = SessionManager.get_session
-cleanup_sessions = SessionManager.cleanup_sessions

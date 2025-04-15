@@ -55,21 +55,49 @@ async def overlay_zones(
 
         # Guardar las ROIs en la sesión
         rois = {}
-        for zone in zones_info:
-            if not isinstance(zone, dict) or 'name' not in zone:
-                continue
+        
+        # Procesar zonas según su formato
+        if isinstance(zones_info, list):
+            # Formato de lista simple
+            for zone in zones_info:
+                if not isinstance(zone, dict) or 'name' not in zone:
+                    continue
+                    
+                field_name = zone['name']
+                x = int(zone.get('left', 0))
+                y = int(zone.get('top', 0))
+                w = int(zone.get('width', 0))
+                h = int(zone.get('height', 0))
                 
-            field_name = zone['name']
-            x = int(zone.get('left', 0))
-            y = int(zone.get('top', 0))
-            w = int(zone.get('width', 0))
-            h = int(zone.get('height', 0))
+                if x < 0 or y < 0 or w <= 0 or h <= 0:
+                    continue
+                    
+                rois[field_name] = [x, y, w, h]
+        elif isinstance(zones_info, dict):
+            # Formato jerárquico
+            def extract_zones(data, prefix=""):
+                if isinstance(data, dict):
+                    if 'name' in data and all(k in data for k in ['left', 'top', 'width', 'height']):
+                        field_name = data['name']
+                        x = int(data.get('left', 0))
+                        y = int(data.get('top', 0))
+                        w = int(data.get('width', 0))
+                        h = int(data.get('height', 0))
+                        
+                        if x >= 0 and y >= 0 and w > 0 and h > 0:
+                            rois[field_name] = [x, y, w, h]
+                    else:
+                        for key, value in data.items():
+                            new_prefix = f"{prefix}.{key}" if prefix else key
+                            extract_zones(value, new_prefix)
+                elif isinstance(data, list):
+                    for i, item in enumerate(data):
+                        new_prefix = f"{prefix}[{i}]"
+                        extract_zones(item, new_prefix)
             
-            if x < 0 or y < 0 or w <= 0 or h <= 0:
-                continue
-                
-            rois[field_name] = [x, y, w, h]
-
+            # Iniciar extracción recursiva de zonas
+            extract_zones(zones_info)
+        
         # Guardar la ruta y las ROIs en la sesión
         session.overlay_path = result_path
         session.rois = rois
@@ -106,29 +134,22 @@ async def get_fields(
         raise HTTPException(status_code=400, detail='Sesión no válida o expirada.')
 
     try:
-        zones_info = session.zones_info
-        fields = []
+        # Usar los campos ya procesados en la sesión
+        text_fields = session.text_fields
+        mark_fields = session.mark_fields
         
-        if isinstance(zones_info, dict):
-            for key, value in zones_info.items():
-                if isinstance(value, dict):
-                    for subkey, subvalue in value.items():
-                        if isinstance(subvalue, dict) and 'name' in subvalue:
-                            fields.append(subvalue['name'])
-                        elif isinstance(subvalue, dict):
-                            for k, v in subvalue.items():
-                                if isinstance(v, dict) and 'name' in v:
-                                    fields.append(v['name'])
+        logger.info(f"Campos de texto: {text_fields}")
+        logger.info(f"Campos de marca: {mark_fields}")
 
-        logger.info(f"Campos encontrados en el JSON: {fields}")
-
-        if not fields:
+        if not text_fields and not mark_fields:
             logger.warning("No se encontraron campos en el JSON")
             return {'success': False, 'error': 'No se encontraron campos en el JSON'}
 
         return {
             'success': True,
-            'fields': sorted(fields)
+            'text_fields': sorted(text_fields),
+            'mark_fields': sorted(mark_fields),
+            'fields': sorted(text_fields + mark_fields)
         }
 
     except Exception as e:
@@ -165,6 +186,17 @@ async def recognize_text(
         if not fields_list:
             raise HTTPException(status_code=400, detail="No se seleccionaron campos")
 
+        # Verificar si se debe procesar primero el paso de overlay
+        if 'overlay' not in session.completed_steps:
+            logger.info("El paso overlay no se ha completado, ejecutándolo automáticamente...")
+            # Ejecutar overlay automáticamente
+            await overlay_zones(
+                request=request,
+                session_id=session_id,
+                opacity=0.4,
+                draw_labels=True
+            )
+
         # Leer imagen
         image_path = session.image_path
         if not os.path.exists(image_path):
@@ -176,9 +208,10 @@ async def recognize_text(
 
         # Obtener ROIs
         rois = []
+        roi_fields = []
         roi_images = {}  # Diccionario para almacenar las imágenes en base64
         
-        if not hasattr(session, 'rois'):
+        if not hasattr(session, 'rois') or not session.rois:
             raise HTTPException(status_code=400, detail="No hay ROIs definidas en la sesión")
 
         logger.info(f"ROIs disponibles en sesión: {session.rois.keys()}")
@@ -190,6 +223,7 @@ async def recognize_text(
                 roi = image[y:y+h, x:x+w]
                 if roi is not None and roi.size > 0:
                     rois.append(roi)
+                    roi_fields.append(field)
                     # Convertir ROI a base64
                     _, buffer = cv2.imencode('.png', roi)
                     roi_base64 = base64.b64encode(buffer).decode('utf-8')
@@ -204,7 +238,7 @@ async def recognize_text(
 
         # Procesar texto
         processor = HandwritingProcessor()
-        results = processor.process_batch(rois, fields_list, session.id)
+        results = processor.process_batch(rois, roi_fields, session.id)
 
         # Agregar las imágenes al resultado
         response_data = {

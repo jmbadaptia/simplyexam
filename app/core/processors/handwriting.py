@@ -143,34 +143,26 @@ class HandwritingProcessor(BaseProcessor):
                 raise ValueError("Sesión no válida o expirada")
                 
             # Verificar que tenemos los archivos necesarios
-            if not (session.pdf_path or session.image_path):
+            if not hasattr(session, 'pdf_path'):
+                logger.warning("La sesión no tiene atributo pdf_path, añadiendo...")
+                session.pdf_path = None
+                
+            # Verificar que hay uno de los archivos disponibles
+            if not ((hasattr(session, 'pdf_path') and session.pdf_path) or 
+                    (hasattr(session, 'image_path') and session.image_path)):
                 raise ValueError("No hay archivos cargados en la sesión")
 
             # Determinar el archivo a utilizar y su tipo MIME
             file_path = None
             media_type = None
             
-            # Intentar primero con el PDF si está disponible
-            if session.is_pdf and session.pdf_path:
-                try:
-                    # Verificar tamaño del PDF
-                    file_size = os.path.getsize(session.pdf_path)
-                    if file_size > 10 * 1024 * 1024:  # 10MB en bytes
-                        logger.warning(f"PDF demasiado grande: {file_size / (1024*1024):.2f} MB. Usando imagen convertida.")
-                        if not session.image_path:
-                            raise ValueError("El PDF es demasiado grande y no hay imagen alternativa disponible")
-                    else:
-                        # Si el PDF tiene tamaño adecuado, usarlo
-                        file_path = session.pdf_path
-                        media_type = "application/pdf"
-                        logger.info(f"Usando PDF original: {file_path}")
-                except Exception as pdf_error:
-                    logger.warning(f"Error al procesar PDF: {pdf_error}. Intentando con imagen...")
-                    if not session.image_path:
-                        raise ValueError(f"Error con el PDF y no hay imagen alternativa: {pdf_error}")
-            
-            # Si no se pudo usar el PDF o no había PDF, usar la imagen
-            if file_path is None and session.image_path:
+            # Intentar primero con PDF si está disponible y es preferible
+            if hasattr(session, 'is_pdf') and session.is_pdf and hasattr(session, 'pdf_path') and session.pdf_path:
+                file_path = session.pdf_path
+                media_type = "application/pdf"
+                logger.info(f"Usando PDF original: {file_path}")
+            elif hasattr(session, 'image_path') and session.image_path:
+                # Usar imagen
                 file_path = session.image_path
                 # Determinar tipo MIME basado en la extensión
                 if file_path.lower().endswith('.jpg') or file_path.lower().endswith('.jpeg'):
@@ -188,9 +180,14 @@ class HandwritingProcessor(BaseProcessor):
                         else:
                             raise ValueError(f"Tipo de archivo no soportado: {file_path}")
                 logger.info(f"Usando archivo de imagen: {file_path} con tipo MIME: {media_type}")
-            
-            if file_path is None:
-                raise ValueError("No se pudo determinar un archivo válido para procesar")
+            else:
+                raise ValueError("No se encontró un archivo válido para procesar")
+                
+            # Verificar tamaño del archivo
+            file_size = os.path.getsize(file_path)
+            logger.info(f"Tamaño del archivo: {file_size / (1024*1024):.2f} MB")
+            if file_size > 10 * 1024 * 1024:  # 10MB
+                raise ValueError(f"El archivo es demasiado grande: {file_size / (1024*1024):.2f} MB. Máximo permitido: 10MB")
                 
             # Leer el archivo y convertirlo a base64
             with open(file_path, "rb") as file:
@@ -199,7 +196,7 @@ class HandwritingProcessor(BaseProcessor):
                 
             logger.info(f"Archivo convertido a base64, longitud: {len(file_base64)}, tipo: {media_type}")
 
-            # Construir el mensaje con el archivo - CORREGIDO AQUÍ
+            # Construir el mensaje con el archivo - CORREGIDO PARA USAR "pdf" EN LUGAR DE "document"
             message_content = [
                 {
                     "type": "text",
