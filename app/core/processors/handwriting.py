@@ -142,71 +142,44 @@ class HandwritingProcessor(BaseProcessor):
             if not session:
                 raise ValueError("Sesión no válida o expirada")
                 
-            # Verificar que tenemos los archivos necesarios
+            # Verificar que tenemos el archivo PDF
             if not hasattr(session, 'pdf_path'):
                 logger.warning("La sesión no tiene atributo pdf_path, añadiendo...")
                 session.pdf_path = None
                 
-            # Verificar que hay uno de los archivos disponibles
-            if not ((hasattr(session, 'pdf_path') and session.pdf_path) or 
-                    (hasattr(session, 'image_path') and session.image_path)):
-                raise ValueError("No hay archivos cargados en la sesión")
+            # Verificar que el PDF está disponible
+            if not (hasattr(session, 'pdf_path') and session.pdf_path):
+                raise ValueError("No hay PDF cargado en la sesión")
 
-            # Determinar el archivo a utilizar y su tipo MIME
-            file_path = None
-            media_type = None
-            
-            # Intentar primero con PDF si está disponible y es preferible
-            if hasattr(session, 'is_pdf') and session.is_pdf and hasattr(session, 'pdf_path') and session.pdf_path:
-                file_path = session.pdf_path
-                media_type = "application/pdf"
-                logger.info(f"Usando PDF original: {file_path}")
-            elif hasattr(session, 'image_path') and session.image_path:
-                # Usar imagen
-                file_path = session.image_path
-                # Determinar tipo MIME basado en la extensión
-                if file_path.lower().endswith('.jpg') or file_path.lower().endswith('.jpeg'):
-                    media_type = "image/jpeg"
-                elif file_path.lower().endswith('.png'):
-                    media_type = "image/png"
-                else:
-                    # Intentar determinar por contenido
-                    with open(file_path, "rb") as f:
-                        first_bytes = f.read(8)
-                        if first_bytes.startswith(b'\x89PNG\r\n\x1a\n'):
-                            media_type = "image/png"
-                        elif first_bytes.startswith(b'\xff\xd8\xff'):
-                            media_type = "image/jpeg"
-                        else:
-                            raise ValueError(f"Tipo de archivo no soportado: {file_path}")
-                logger.info(f"Usando archivo de imagen: {file_path} con tipo MIME: {media_type}")
-            else:
-                raise ValueError("No se encontró un archivo válido para procesar")
+            # Usar el PDF original
+            file_path = session.pdf_path
+            media_type = "application/pdf"
+            logger.info(f"Usando PDF original: {file_path}")
                 
             # Verificar tamaño del archivo
             file_size = os.path.getsize(file_path)
-            logger.info(f"Tamaño del archivo: {file_size / (1024*1024):.2f} MB")
+            logger.info(f"Tamaño del PDF: {file_size / (1024*1024):.2f} MB")
             if file_size > 10 * 1024 * 1024:  # 10MB
-                raise ValueError(f"El archivo es demasiado grande: {file_size / (1024*1024):.2f} MB. Máximo permitido: 10MB")
+                raise ValueError(f"El PDF es demasiado grande: {file_size / (1024*1024):.2f} MB. Máximo permitido: 10MB")
                 
             # Leer el archivo y convertirlo a base64
             with open(file_path, "rb") as file:
                 file_content = file.read()
                 file_base64 = base64.b64encode(file_content).decode('utf-8')
                 
-            logger.info(f"Archivo convertido a base64, longitud: {len(file_base64)}, tipo: {media_type}")
+            logger.info(f"PDF convertido a base64, longitud: {len(file_base64)}")
 
-            # Construir el mensaje con el archivo - CORREGIDO PARA USAR "pdf" EN LUGAR DE "document"
+            # Construir el mensaje con el archivo - USANDO "document" para PDFs
             message_content = [
                 {
                     "type": "text",
                     "text": self._prompt_template.format(fields=", ".join(field_names))
                 },
                 {
-                    "type": "pdf" if media_type == "application/pdf" else "image",
+                    "type": "document",
                     "source": {
                         "type": "base64",
-                        "media_type": media_type,
+                        "media_type": "application/pdf",
                         "data": file_base64
                     }
                 }
