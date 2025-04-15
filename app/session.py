@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 class Session:
     """Gestiona datos de sesión para un proceso de análisis OMR"""
-    
+        
     def __init__(self, id=None):
         self.id = id or str(uuid.uuid4())
         self.created_at = time.time()
@@ -16,12 +16,12 @@ class Session:
         self.text_fields = []
         self.mark_fields = []
         self.image_path = None
+        self.pdf_path = None  # Añadir esta línea
         self.is_pdf = False
         self.overlay_path = None
         self.completed_steps = []
         self.results = {}
         self.rois = {}  # Diccionario para almacenar las ROIs
-        logger.debug(f"Nueva sesión inicializada con ID: {self.id}")
         
     def update(self, **kwargs):
         """Actualiza atributos de la sesión"""

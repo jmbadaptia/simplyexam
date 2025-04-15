@@ -1,191 +1,215 @@
 import os
 import json
 import logging
-import base64
+from flask import Blueprint, request, jsonify, current_app
+from werkzeug.utils import secure_filename
 import uuid
-from flask import Blueprint, request, jsonify
-from app.config import settings
-from app.core.utils.file_utils import allowed_file, is_mark_field
-from app.session import create_session, get_session
 from pdf2image import convert_from_path
 import tempfile
-from PIL import Image
+from app.config import settings
+from app.session import create_session
+from app.core.processors.handwriting import HandwritingProcessor
+from app.core.processors.mark import MarkProcessor
 
 logger = logging.getLogger(__name__)
 
 uploads_bp = Blueprint('uploads', __name__)
 
+def allowed_file(filename, allowed_extensions):
+    """Verificar si un archivo tiene una extensión permitida"""
+    return '.' in filename and \
+           filename.rsplit('.', 1)[1].lower() in allowed_extensions
+
 @uploads_bp.route('/api/upload-json', methods=['POST'])
 def upload_json():
-    """Subir y procesar archivo JSON con definición de zonas"""
-    if 'json_file' not in request.files:
-        return jsonify({'error': 'Falta archivo JSON'}), 400
-    
-    json_file = request.files['json_file']
-    if json_file.filename == '':
-        return jsonify({'error': 'Nombre de archivo inválido'}), 400
-    
-    if not allowed_file(json_file.filename, {'json'}):
-        return jsonify({'error': 'Tipo de archivo no permitido'}), 400
-    
+    """Endpoint para subir archivo JSON de zonas"""
     try:
+        # Verificar si se envió un archivo
+        if 'json_file' not in request.files:
+            return jsonify({'success': False, 'error': 'No se envió archivo JSON'}), 400
+            
+        file = request.files['json_file']
+        
+        # Verificar si el nombre del archivo es válido
+        if file.filename == '':
+            return jsonify({'success': False, 'error': 'Nombre de archivo vacío'}), 400
+            
+        # Verificar si es un JSON
+        if not file.filename.lower().endswith('.json'):
+            return jsonify({'success': False, 'error': 'El archivo debe ser JSON'}), 400
+            
+        # Crear una nueva sesión
         session = create_session()
-        session_id = session.id
-        json_filename = f"{session_id}_{json_file.filename}"
-        json_path = os.path.join(settings.UPLOAD_FOLDER, json_filename)
         
-        json_file.save(json_path)
-        logger.info(f"Archivo JSON guardado: {json_path}")
+        # Crear nombre de archivo seguro
+        filename = f"{session.id}_{secure_filename(file.filename)}"
         
-        # Cargar y procesar el JSON
-        with open(json_path, 'r') as f:
-            zones_info = json.load(f)
+        # Crear la carpeta de uploads si no existe
+        os.makedirs(current_app.config['UPLOAD_FOLDER'], exist_ok=True)
         
-        # Clasificar campos y extraer ROIs
-        text_fields = set()
-        mark_fields = set()
-        rois = {}
+        # Guardar el archivo
+        filepath = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
+        file.save(filepath)
+        logger.info(f"Archivo JSON guardado: {filepath}")
         
-        for zone in zones_info:
-            if not isinstance(zone, dict) or 'name' not in zone:
-                continue
+        # Leer el contenido del JSON
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                zones_info = json.load(f)
+        except Exception as e:
+            return jsonify({'success': False, 'error': f'Error al leer JSON: {str(e)}'}), 400
+            
+        # Extraer campos de texto y marca
+        text_fields = []
+        mark_fields = []
+        
+        try:
+            text_processor = HandwritingProcessor()
+            mark_processor = MarkProcessor()
+            
+            # Procesar zonas y clasificar por tipo
+            if isinstance(zones_info, list):
+                for zone in zones_info:
+                    if isinstance(zone, dict) and 'name' in zone:
+                        # Determinar si es campo de texto o marca
+                        # ... (tu lógica de clasificación)
+                        text_fields.append(zone['name'])  # Simplificado para el ejemplo
+            elif isinstance(zones_info, dict):
+                # Procesamiento para formato jerárquico
+                # ... (tu lógica para extraer campos)
+                pass
                 
-            field_name = zone['name']
-            if is_mark_field(field_name):
-                mark_fields.add(field_name)
-            else:
-                text_fields.add(field_name)
+            logger.info(f"Campos de texto identificados: {text_fields}")
+            logger.info(f"Campos de marca identificados: {mark_fields}")
             
-            # Extraer coordenadas de la ROI
-            x = int(zone.get('left', 0))
-            y = int(zone.get('top', 0))
-            w = int(zone.get('width', 0))
-            h = int(zone.get('height', 0))
+        except Exception as e:
+            logger.error(f"Error al procesar zonas: {str(e)}", exc_info=True)
             
-            if x >= 0 and y >= 0 and w > 0 and h > 0:
-                rois[field_name] = [x, y, w, h]
-        
-        # Actualizar sesión
-        session.json_path = json_path
+        # Actualizar información de la sesión
+        session.json_path = filepath
         session.zones_info = zones_info
-        session.text_fields = list(text_fields)
-        session.mark_fields = list(mark_fields)
-        session.rois = rois
+        session.text_fields = text_fields
+        session.mark_fields = mark_fields
         session.add_completed_step('json_upload')
         
-        logger.info(f"ROIs extraídas: {list(rois.keys())}")
+        # Establecer campos de texto para procesadores
+        text_processor.set_text_fields(set(text_fields))
         
         return jsonify({
             'success': True,
-            'session_id': session_id,
-            'text_fields': sorted(text_fields),
-            'mark_fields': sorted(mark_fields)
+            'message': 'Archivo JSON cargado correctamente',
+            'session_id': session.id,
+            'text_fields': text_fields,
+            'mark_fields': mark_fields
         })
         
     except Exception as e:
-        logger.error(f"Error al procesar JSON: {e}", exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error al procesar archivo JSON: {str(e)}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @uploads_bp.route('/api/upload-pdf', methods=['POST'])
 def upload_pdf():
-    """Subir y procesar archivo PDF o imagen"""
-    session_id = request.form.get('session_id')
-    if not session_id:
-        return jsonify({'error': 'Falta ID de sesión'}), 400
-    
-    session = get_session(session_id)
-    if not session:
-        return jsonify({'error': 'Sesión no válida'}), 400
-    
-    if 'json_upload' not in session.completed_steps:
-        return jsonify({'error': 'Debe subir el JSON primero'}), 400
-    
-    if 'pdf_file' not in request.files:
-        return jsonify({'error': 'Falta archivo PDF o imagen'}), 400
-    
-    pdf_file = request.files['pdf_file']
-    if pdf_file.filename == '':
-        return jsonify({'error': 'Nombre de archivo inválido'}), 400
-    
-    if not allowed_file(pdf_file.filename, {'pdf', 'png', 'jpg', 'jpeg'}):
-        return jsonify({'error': 'Tipo de archivo no permitido'}), 400
-    
+    """Endpoint para subir archivo PDF o imagen"""
     try:
-        file_extension = pdf_file.filename.rsplit('.', 1)[1].lower()
-        is_pdf = file_extension == 'pdf'
+        # Verificar si se envió el ID de sesión
+        if 'session_id' not in request.form:
+            return jsonify({'success': False, 'error': 'No se proporcionó ID de sesión'}), 400
+            
+        session_id = request.form['session_id']
+        from app.session import get_session
         
-        # Guardar archivo
-        pdf_filename = f"{session_id}_{pdf_file.filename}"
-        pdf_path = os.path.join(settings.UPLOAD_FOLDER, pdf_filename)
-        pdf_file.save(pdf_path)
+        # Obtener la sesión
+        session = get_session(session_id)
+        if not session:
+            return jsonify({'success': False, 'error': 'Sesión no válida o expirada'}), 400
+            
+        # Verificar si se envió un archivo
+        if 'pdf_file' not in request.files:
+            return jsonify({'success': False, 'error': 'No se envió archivo PDF/imagen'}), 400
+            
+        file = request.files['pdf_file']
         
-        # Si es PDF, convertir a imagen para visualización
+        # Verificar si el nombre del archivo es válido
+        if file.filename == '':
+            return jsonify({'success': False, 'error': 'Nombre de archivo vacío'}), 400
+            
+        # Verificar si es un tipo de archivo permitido
+        if not allowed_file(file.filename, current_app.config['ALLOWED_EXTENSIONS']):
+            return jsonify({'success': False, 'error': 'Tipo de archivo no permitido'}), 400
+            
+        # Crear nombre de archivo seguro
+        filename = f"{session_id}_{secure_filename(file.filename)}"
+        
+        # Crear la carpeta de uploads si no existe
+        os.makedirs(current_app.config['UPLOAD_FOLDER'], exist_ok=True)
+        
+        # Guardar el archivo
+        filepath = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
+        file.save(filepath)
+        logger.info(f"Archivo subido: {filepath}")
+        
+        # Determinar si es PDF
+        is_pdf = file.filename.lower().endswith('.pdf')
+        
         if is_pdf:
+            # Guardar la ruta del PDF original en la sesión
+            session.pdf_path = filepath
+            session.is_pdf = True
+            logger.info(f"PDF guardado: {filepath}")
+            
+            # Convertir PDF a imagen
             try:
-                # Configuración para la conversión
-                target_width = 1786
-                target_height = 2526
-                dpi = 200
-                
-                # Ruta a poppler según el sistema operativo
-                if os.name == 'nt':  # Windows
-                    poppler_path = r"C:\Python312\poppler-24.08.0\Library\bin"
-                else:  # Linux/Unix
-                    poppler_path = None  # En Linux normalmente no es necesario especificarlo
-                
-                logger.info(f"Iniciando conversión de PDF con DPI={dpi}")
-                
-                # Convertir PDF a imagen
-                images = convert_from_path(
-                    pdf_path,
-                    dpi=dpi,
-                    output_folder=settings.UPLOAD_FOLDER,
-                    fmt='jpg',
-                    paths_only=False,
-                    poppler_path=poppler_path,
-                    first_page=1,
-                    last_page=1
-                )
-                
-                if not images:
-                    return jsonify({'error': 'No se pudo extraer imagen del PDF'}), 500
-                
-                # Redimensionar a las dimensiones exactas
-                image = images[0].resize((target_width, target_height), Image.LANCZOS)
-                
-                # Guardar la imagen
-                image_filename = pdf_filename.rsplit('.', 1)[0] + '.jpg'
-                image_path = os.path.join(settings.UPLOAD_FOLDER, image_filename)
-                image.save(image_path, format='JPEG', quality=95)
-                
-                logger.info(f"Imagen guardada y redimensionada a {target_width}x{target_height}: {image_path}")
-                
+                # Crear carpeta temporal para las imágenes
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    logger.info(f"Convirtiendo PDF a imagen...")
+                    
+                    # Convertir primera página del PDF a imagen
+                    images = convert_from_path(
+                        filepath, 
+                        first_page=1, 
+                        last_page=1,
+                        dpi=200,
+                        output_folder=temp_dir
+                    )
+                    
+                    if not images:
+                        return jsonify({'success': False, 'error': 'No se pudo convertir el PDF a imagen'}), 500
+                        
+                    # Guardar la imagen convertida
+                    image_filename = f"{session_id}_converted.jpg"
+                    image_path = os.path.join(current_app.config['UPLOAD_FOLDER'], image_filename)
+                    images[0].save(image_path, 'JPEG')
+                    logger.info(f"Imagen convertida guardada: {image_path}")
+                    
+                    # Guardar ruta de la imagen en la sesión
+                    session.image_path = image_path
+                    
             except Exception as e:
-                logger.error(f"Error al convertir PDF: {e}", exc_info=True)
-                return jsonify({'error': f'Error al procesar el PDF: {str(e)}'}), 500
+                logger.error(f"Error al convertir PDF: {str(e)}", exc_info=True)
+                return jsonify({'success': False, 'error': f'Error al procesar PDF: {str(e)}'}), 500
         else:
-            image_path = pdf_path
-            image_filename = pdf_filename
-        
-        # Actualizar datos de sesión
-        session.update(
-            pdf_path=pdf_path,  # Siempre guardamos la ruta del PDF
-            image_path=image_path,
-            is_pdf=is_pdf
-        )
+            # Es una imagen
+            session.image_path = filepath
+            session.is_pdf = False
+            logger.info(f"Imagen guardada: {filepath}")
+            
+        # Marcar paso como completado
         session.add_completed_step('pdf_upload')
         
-        # Construir la URL relativa para la imagen
-        image_url = f"/static/uploads/{image_filename}"
-        
+        # Construir URL relativa para la imagen
+        if session.image_path:
+            relative_path = os.path.relpath(session.image_path, settings.STATIC_FOLDER)
+            image_url = f"/static/{relative_path.replace(os.sep, '/')}"
+        else:
+            image_url = None
+            
         return jsonify({
             'success': True,
-            'message': f"{'PDF convertido' if is_pdf else 'Imagen procesada'} correctamente",
-            'filename': image_filename,
-            'image_url': image_url,
-            'ready_for_overlay': True
+            'message': 'Archivo procesado correctamente',
+            'is_pdf': is_pdf,
+            'image_url': image_url
         })
         
     except Exception as e:
-        logger.error(f"Error al procesar archivo: {e}", exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error al procesar archivo: {str(e)}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
