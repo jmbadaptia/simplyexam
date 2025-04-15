@@ -84,11 +84,6 @@
         .result-value {
             flex: 1;
         }
-        .roi-image {
-            max-width: 200px;
-            margin-top: 5px;
-            border: 1px solid #ddd;
-        }
     </style>
 </head>
 <body>
@@ -310,20 +305,13 @@
                 const data = await response.json();
 
                 if (data.success) {
-                    // Mostrar los resultados con las imágenes de cada ROI
+                    // Mostrar solo los resultados sin las imágenes
                     let resultsHtml = '<h3>Resultados:</h3>';
                     for (const [field, value] of Object.entries(data.results)) {
-                        const roiImage = data.roi_images && data.roi_images[field] 
-                            ? `<img src="${data.roi_images[field]}" alt="ROI ${field}" class="roi-image">` 
-                            : '';
-                        
                         resultsHtml += `
                             <div class="result-item">
                                 <div class="result-field">${field}:</div>
-                                <div class="result-value">
-                                    ${value}
-                                    ${roiImage}
-                                </div>
+                                <div class="result-value">${value}</div>
                             </div>
                         `;
                     }
