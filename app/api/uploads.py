@@ -20,6 +20,10 @@ def allowed_file(filename, allowed_extensions):
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in allowed_extensions
 
+def is_text_field(field_name):
+    """Determina si un campo es de texto basado en su nombre"""
+    return field_name == "DNI" or len(field_name) >= 4
+
 @uploads_bp.route('/api/upload-json', methods=['POST'])
 def upload_json():
     """Endpoint para subir archivo JSON de zonas"""
@@ -67,17 +71,31 @@ def upload_json():
             text_processor = HandwritingProcessor()
             mark_processor = MarkProcessor()
             
-            # Procesar zonas y clasificar por tipo
+            # Función para extraer campos de forma recursiva
+            def extract_fields(data, prefix=""):
+                if isinstance(data, dict):
+                    if 'name' in data:
+                        field_name = data['name']
+                        # Clasificar como texto o marca
+                        if is_text_field(field_name):
+                            text_fields.append(field_name)
+                        else:
+                            mark_fields.append(field_name)
+                    else:
+                        for key, value in data.items():
+                            new_prefix = f"{prefix}.{key}" if prefix else key
+                            extract_fields(value, new_prefix)
+                elif isinstance(data, list):
+                    for i, item in enumerate(data):
+                        new_prefix = f"{prefix}[{i}]"
+                        extract_fields(item, new_prefix)
+            
+            # Extraer campos según la estructura del JSON
             if isinstance(zones_info, list):
                 for zone in zones_info:
-                    if isinstance(zone, dict) and 'name' in zone:
-                        # Determinar si es campo de texto o marca
-                        # ... (tu lógica de clasificación)
-                        text_fields.append(zone['name'])  # Simplificado para el ejemplo
-            elif isinstance(zones_info, dict):
-                # Procesamiento para formato jerárquico
-                # ... (tu lógica para extraer campos)
-                pass
+                    extract_fields(zone)
+            else:
+                extract_fields(zones_info)
                 
             logger.info(f"Campos de texto identificados: {text_fields}")
             logger.info(f"Campos de marca identificados: {mark_fields}")
@@ -157,7 +175,7 @@ def upload_pdf():
             session.is_pdf = True
             logger.info(f"PDF guardado: {filepath}")
             
-            # Convertir PDF a imagen
+            # Convertir PDF a imagen para visualización
             try:
                 # Crear carpeta temporal para las imágenes
                 with tempfile.TemporaryDirectory() as temp_dir:

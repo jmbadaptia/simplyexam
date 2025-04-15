@@ -17,6 +17,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+def is_text_field(field_name):
+    """Determina si un campo es de texto basado en su nombre"""
+    return field_name == "DNI" or len(field_name) >= 4
+
 @router.post('/api/overlay-zones')
 async def overlay_zones(
     request: Request,
@@ -56,46 +60,32 @@ async def overlay_zones(
         # Guardar las ROIs en la sesión
         rois = {}
         
+        # Función para extraer zonas recursivamente
+        def extract_zones(data, prefix=""):
+            if isinstance(data, dict):
+                if 'name' in data and all(k in data for k in ['left', 'top', 'width', 'height']):
+                    field_name = data['name']
+                    x = int(data.get('left', 0))
+                    y = int(data.get('top', 0))
+                    w = int(data.get('width', 0))
+                    h = int(data.get('height', 0))
+                    
+                    if x >= 0 and y >= 0 and w > 0 and h > 0:
+                        rois[field_name] = [x, y, w, h]
+                else:
+                    for key, value in data.items():
+                        new_prefix = f"{prefix}.{key}" if prefix else key
+                        extract_zones(value, new_prefix)
+            elif isinstance(data, list):
+                for i, item in enumerate(data):
+                    new_prefix = f"{prefix}[{i}]"
+                    extract_zones(item, new_prefix)
+        
         # Procesar zonas según su formato
         if isinstance(zones_info, list):
-            # Formato de lista simple
             for zone in zones_info:
-                if not isinstance(zone, dict) or 'name' not in zone:
-                    continue
-                    
-                field_name = zone['name']
-                x = int(zone.get('left', 0))
-                y = int(zone.get('top', 0))
-                w = int(zone.get('width', 0))
-                h = int(zone.get('height', 0))
-                
-                if x < 0 or y < 0 or w <= 0 or h <= 0:
-                    continue
-                    
-                rois[field_name] = [x, y, w, h]
-        elif isinstance(zones_info, dict):
-            # Formato jerárquico
-            def extract_zones(data, prefix=""):
-                if isinstance(data, dict):
-                    if 'name' in data and all(k in data for k in ['left', 'top', 'width', 'height']):
-                        field_name = data['name']
-                        x = int(data.get('left', 0))
-                        y = int(data.get('top', 0))
-                        w = int(data.get('width', 0))
-                        h = int(data.get('height', 0))
-                        
-                        if x >= 0 and y >= 0 and w > 0 and h > 0:
-                            rois[field_name] = [x, y, w, h]
-                    else:
-                        for key, value in data.items():
-                            new_prefix = f"{prefix}.{key}" if prefix else key
-                            extract_zones(value, new_prefix)
-                elif isinstance(data, list):
-                    for i, item in enumerate(data):
-                        new_prefix = f"{prefix}[{i}]"
-                        extract_zones(item, new_prefix)
-            
-            # Iniciar extracción recursiva de zonas
+                extract_zones(zone)
+        else:
             extract_zones(zones_info)
         
         # Guardar la ruta y las ROIs en la sesión
@@ -197,7 +187,13 @@ async def recognize_text(
                 draw_labels=True
             )
 
-        # Leer imagen
+        # Verificar que hay ROIs definidas
+        if not hasattr(session, 'rois') or not session.rois:
+            raise HTTPException(status_code=400, detail="No hay ROIs definidas en la sesión")
+
+        logger.info(f"ROIs disponibles en sesión: {session.rois.keys()}")
+        
+        # Leer imagen para extraer ROIs
         image_path = session.image_path
         if not os.path.exists(image_path):
             raise HTTPException(status_code=400, detail="Imagen no encontrada")
@@ -206,17 +202,21 @@ async def recognize_text(
         if image is None:
             raise HTTPException(status_code=400, detail="Error al leer la imagen")
 
-        # Obtener ROIs
+        # Filtrar solo campos de texto
+        text_fields = []
+        for field in fields_list:
+            if field in session.text_fields or is_text_field(field):
+                text_fields.append(field)
+        
+        if not text_fields:
+            raise HTTPException(status_code=400, detail="No se seleccionaron campos de texto válidos")
+        
+        # Obtener ROIs para los campos de texto
         rois = []
         roi_fields = []
         roi_images = {}  # Diccionario para almacenar las imágenes en base64
         
-        if not hasattr(session, 'rois') or not session.rois:
-            raise HTTPException(status_code=400, detail="No hay ROIs definidas en la sesión")
-
-        logger.info(f"ROIs disponibles en sesión: {session.rois.keys()}")
-        
-        for field in fields_list:
+        for field in text_fields:
             if field in session.rois:
                 roi_coords = session.rois[field]
                 x, y, w, h = map(int, roi_coords)
@@ -234,9 +234,9 @@ async def recognize_text(
                 logger.warning(f"Campo {field} no encontrado en las ROIs disponibles")
 
         if not rois:
-            raise HTTPException(status_code=400, detail="No se encontraron ROIs válidas")
+            raise HTTPException(status_code=400, detail="No se encontraron ROIs válidas para los campos seleccionados")
 
-        # Procesar texto
+        # Procesar texto con Claude
         processor = HandwritingProcessor()
         results = processor.process_batch(rois, roi_fields, session.id)
 
@@ -247,6 +247,7 @@ async def recognize_text(
             "roi_images": roi_images,  # Incluir las imágenes de las ROIs
             "debug_info": {
                 "fields_received": fields_list,
+                "text_fields_processed": roi_fields,
                 "rois_found": list(roi_images.keys())
             }
         }

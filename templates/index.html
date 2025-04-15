@@ -56,6 +56,39 @@
             padding: 10px;
             margin-top: 10px;
         }
+        .fields-group {
+            margin-bottom: 15px;
+        }
+        .fields-group h4 {
+            margin-top: 10px;
+            margin-bottom: 5px;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 5px;
+        }
+        .checkbox-label {
+            margin-left: 5px;
+        }
+        .results-container {
+            margin-top: 15px;
+        }
+        .result-item {
+            display: flex;
+            margin-bottom: 10px;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 10px;
+        }
+        .result-field {
+            font-weight: bold;
+            width: 150px;
+        }
+        .result-value {
+            flex: 1;
+        }
+        .roi-image {
+            max-width: 200px;
+            margin-top: 5px;
+            border: 1px solid #ddd;
+        }
     </style>
 </head>
 <body>
@@ -110,7 +143,7 @@
                 </div>
             </div>
             <button id="recognizeBtn" disabled>Reconocer Campos</button>
-            <div id="results"></div>
+            <div id="results" class="results-container"></div>
         </div>
     </div>
 
@@ -277,10 +310,22 @@
                 const data = await response.json();
 
                 if (data.success) {
-                    // Mostrar los resultados
+                    // Mostrar los resultados con las imágenes de cada ROI
                     let resultsHtml = '<h3>Resultados:</h3>';
                     for (const [field, value] of Object.entries(data.results)) {
-                        resultsHtml += `<p><strong>${field}:</strong> ${value}</p>`;
+                        const roiImage = data.roi_images && data.roi_images[field] 
+                            ? `<img src="${data.roi_images[field]}" alt="ROI ${field}" class="roi-image">` 
+                            : '';
+                        
+                        resultsHtml += `
+                            <div class="result-item">
+                                <div class="result-field">${field}:</div>
+                                <div class="result-value">
+                                    ${value}
+                                    ${roiImage}
+                                </div>
+                            </div>
+                        `;
                     }
                     results.innerHTML = resultsHtml;
                 } else {
@@ -301,25 +346,29 @@
             let html = '<div class="fields-group">';
             
             if (textFields.length > 0) {
-                html += '<h4>Campos de texto:</h4>';
+                html += '<h4>Campos de texto (Claude):</h4>';
                 textFields.forEach(field => {
                     html += `
-                        <label>
-                            <input type="checkbox" value="${field}">
-                            ${field}
-                        </label><br>
+                        <div>
+                            <label>
+                                <input type="checkbox" value="${field}" checked>
+                                <span class="checkbox-label">${field}</span>
+                            </label>
+                        </div>
                     `;
                 });
             }
             
             if (markFields.length > 0) {
-                html += '<h4>Campos de marca:</h4>';
+                html += '<h4>Campos de marca (OMR local):</h4>';
                 markFields.forEach(field => {
                     html += `
-                        <label>
-                            <input type="checkbox" value="${field}">
-                            ${field}
-                        </label><br>
+                        <div>
+                            <label>
+                                <input type="checkbox" value="${field}">
+                                <span class="checkbox-label">${field}</span>
+                            </label>
+                        </div>
                     `;
                 });
             }
