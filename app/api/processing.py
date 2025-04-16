@@ -14,7 +14,7 @@ from app.core.processors.mark import MarkProcessor
 # Configurar logger
 logger = logging.getLogger(__name__)
 
-# Crear blueprint
+# Crear blueprint con el mismo nombre que usas en tus otros archivos
 processing_bp = Blueprint('processing', __name__)
 
 def is_text_field(field_name):
@@ -470,28 +470,22 @@ def recognize_all():
         # Procesar marcas si hay campos de ese tipo
         if mark_fields:
             try:
-                # Crear un objeto form_data simulado para recognize_marks
-                from werkzeug.datastructures import MultiDict
-                mark_form = MultiDict([
-                    ('session_id', session_id),
-                    ('fields', json.dumps(mark_fields))
-                ])
+                # Crear un formulario para marcas
+                mark_form_data = {
+                    'session_id': session_id,
+                    'fields': json.dumps(mark_fields)
+                }
                 
-                # Guardar y restaurar el request.form original
-                original_form = request.form
-                request.form = mark_form
-                
-                # Llamar a la función recognize_marks directamente
-                mark_response = recognize_marks()
-                
-                # Restaurar request.form
-                request.form = original_form
-                
-                # Procesar respuesta
-                if isinstance(mark_response, tuple):
-                    mark_data = json.loads(mark_response[0].get_data(as_text=True))
-                else:
-                    mark_data = json.loads(mark_response.get_data(as_text=True))
+                # Llamar al endpoint de marcas con los datos
+                from flask import url_for
+                with current_app.test_client() as client:
+                    mark_response = client.post(
+                        '/api/recognize-marks',
+                        data=mark_form_data
+                    )
+                    
+                # Procesar la respuesta
+                mark_data = json.loads(mark_response.data)
                 
                 if mark_data.get('success'):
                     # Integrar resultados de marcas
@@ -511,28 +505,21 @@ def recognize_all():
         # Procesar texto si hay campos de ese tipo
         if text_fields:
             try:
-                # Crear un objeto form_data simulado para recognize_text
-                from werkzeug.datastructures import MultiDict
-                text_form = MultiDict([
-                    ('session_id', session_id),
-                    ('fields', json.dumps(text_fields))
-                ])
+                # Crear un formulario para texto
+                text_form_data = {
+                    'session_id': session_id,
+                    'fields': json.dumps(text_fields)
+                }
                 
-                # Guardar y restaurar el request.form original
-                original_form = request.form
-                request.form = text_form
-                
-                # Llamar a la función recognize_text directamente
-                text_response = recognize_text()
-                
-                # Restaurar request.form
-                request.form = original_form
-                
-                # Procesar respuesta
-                if isinstance(text_response, tuple):
-                    text_data = json.loads(text_response[0].get_data(as_text=True))
-                else:
-                    text_data = json.loads(text_response.get_data(as_text=True))
+                # Llamar al endpoint de texto con los datos
+                with current_app.test_client() as client:
+                    text_response = client.post(
+                        '/api/recognize-text',
+                        data=text_form_data
+                    )
+                    
+                # Procesar la respuesta
+                text_data = json.loads(text_response.data)
                 
                 if text_data.get('success'):
                     # Integrar resultados de texto
