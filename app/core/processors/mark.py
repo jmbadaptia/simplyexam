@@ -16,6 +16,7 @@ class MarkProcessor:
         self._debug_folder = None
         self._mark_types = {}  # Almacena tipos de marca (círculo, cuadrado)
         self._thresholds = {}  # Umbrales específicos por campo
+        self._calibration_data = {}  # Datos de calibración por tipo de formulario
         
     def initialize(self):
         """Inicializar el procesador de marcas"""
@@ -62,14 +63,21 @@ class MarkProcessor:
             else:
                 gray = roi
                 
-            # Aplicar una ecualización del histograma para mejorar el contraste
-            equalized = cv2.equalizeHist(gray)
+            # Normalizar el tamaño si es muy pequeña
+            h, w = gray.shape
+            if h < 20 or w < 20:
+                scale = max(20/h, 20/w)
+                gray = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_LINEAR)
                 
-            # Normalizar la imagen para mejorar el contraste
+            # Aplicar CLAHE para mejorar el contraste local
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+            equalized = clahe.apply(gray)
+                
+            # Normalizar la imagen para mejorar el contraste global
             normalized = cv2.normalize(equalized, None, 0, 255, cv2.NORM_MINMAX)
             
-            # Reducir ruido con filtro gaussiano
-            denoised = cv2.GaussianBlur(normalized, (3, 3), 0)
+            # Reducir ruido con filtro de mediana
+            denoised = cv2.medianBlur(normalized, 3)
             
             # Detectar el umbral óptimo usando el método de Otsu si la ROI es lo suficientemente grande
             if denoised.size > 100:
@@ -137,30 +145,39 @@ class MarkProcessor:
             else:
                 gray = roi
                 
+            # Detectar círculos usando HoughCircles
+            circles = cv2.HoughCircles(
+                gray, cv2.HOUGH_GRADIENT, dp=1, minDist=20,
+                param1=50, param2=30, minRadius=5, maxRadius=30
+            )
+            
+            if circles is not None:
+                return 'circle', circles[0]
+            
+            # Si no se detectan círculos, buscar rectángulos
             blurred = cv2.GaussianBlur(gray, (5, 5), 0)
             _, thresh = cv2.threshold(blurred, 127, 255, cv2.THRESH_BINARY)
             
             # Encontrar contornos
             contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             
-            # Si no hay contornos, asumir cuadrado
             if not contours:
                 return 'square', []
                 
-            # Determinar si es un círculo o un cuadrado
+            # Determinar si es un cuadrado/rectángulo
             largest_contour = max(contours, key=cv2.contourArea)
             perimeter = cv2.arcLength(largest_contour, True)
             approx = cv2.approxPolyDP(largest_contour, 0.04 * perimeter, True)
             
-            # Calcular circularidad
-            area = cv2.contourArea(largest_contour)
-            circularity = 4 * np.pi * area / (perimeter * perimeter) if perimeter > 0 else 0
+            # Calcular relación de aspecto
+            x, y, w, h = cv2.boundingRect(largest_contour)
+            aspect_ratio = float(w)/h if h > 0 else 0
             
-            # Si tiene alta circularidad o muchos vértices, probablemente es un círculo
-            if circularity > 0.8 or len(approx) > 6:
-                return 'circle', contours
-            else:
+            # Si tiene 4 vértices y relación de aspecto cercana a 1, es un cuadrado
+            if len(approx) == 4 and 0.8 <= aspect_ratio <= 1.2:
                 return 'square', contours
+            else:
+                return 'circle', contours
                 
         except Exception as e:
             logger.error(f"Error en detección de forma: {e}")
@@ -216,6 +233,16 @@ class MarkProcessor:
                 marked_pixels = np.count_nonzero(cv2.bitwise_and(processed_roi, mask))
                 mark_percentage = (marked_pixels / center_pixels) * 100 if center_pixels > 0 else 0
                 
+                # Validar la distribución de los píxeles marcados
+                if marked_pixels > 0:
+                    # Calcular el centro de masa de los píxeles marcados
+                    y_indices, x_indices = np.where(center_roi > 0)
+                    if len(x_indices) > 0 and len(y_indices) > 0:
+                        center_mass_x = np.mean(x_indices)
+                        center_mass_y = np.mean(y_indices)
+                        distance_from_center = np.sqrt((center_mass_x - center_x)**2 + (center_mass_y - center_y)**2)
+                        metadata['center_deviation'] = distance_from_center / radius
+                
                 # Guardar máscara para debug
                 if self._debug_folder and field_name:
                     cv2.imwrite(os.path.join(self._debug_folder, f"{field_name}_mask.png"), mask)
@@ -226,6 +253,15 @@ class MarkProcessor:
                 total_pixels = processed_roi.size
                 marked_pixels = np.count_nonzero(processed_roi)
                 mark_percentage = (marked_pixels / total_pixels) * 100
+                
+                # Validar la distribución de los píxeles marcados
+                if marked_pixels > 0:
+                    # Calcular la distribución espacial
+                    y_indices, x_indices = np.where(processed_roi > 0)
+                    if len(x_indices) > 0 and len(y_indices) > 0:
+                        x_std = np.std(x_indices)
+                        y_std = np.std(y_indices)
+                        metadata['spatial_distribution'] = (x_std/w, y_std/h)
             
             # Determinar si está marcado según umbral correspondiente
             if field_name in self._thresholds:
@@ -233,15 +269,22 @@ class MarkProcessor:
                 threshold = self._thresholds[field_name]
             elif shape_type == 'circle':
                 # Los círculos suelen requerir un umbral más bajo
-                threshold = getattr(settings, 'CIRCLE_MARK_THRESHOLD', 15)  # Reducido de 25 a 15
+                threshold = getattr(settings, 'CIRCLE_MARK_THRESHOLD', 15)
             else:
-                threshold = getattr(settings, 'MARK_THRESHOLD', 20)  # Reducido de 30 a 20
+                threshold = getattr(settings, 'MARK_THRESHOLD', 20)
                 
             # Ajuste dinámico del umbral basado en el tamaño
-            # ROIs más pequeñas necesitan un umbral más bajo
             area = w * h
             if area < 400:  # ROI pequeña (menos de 20x20)
                 threshold *= 0.8  # Reducir el umbral en un 20%
+            
+            # Ajuste adicional basado en la distribución espacial
+            if 'spatial_distribution' in metadata:
+                x_std, y_std = metadata['spatial_distribution']
+                if x_std < 0.2 or y_std < 0.2:  # Distribución muy concentrada
+                    threshold *= 1.2  # Aumentar el umbral
+                elif x_std > 0.4 or y_std > 0.4:  # Distribución muy dispersa
+                    threshold *= 0.8  # Reducir el umbral
             
             is_marked = mark_percentage > threshold
             
