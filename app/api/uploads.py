@@ -175,45 +175,46 @@ def upload_pdf():
             session.is_pdf = True
             logger.info(f"PDF guardado: {filepath}")
             
-            # Convertir PDF a imagen para visualización
+            # Convertir PDF a imagen
             try:
-                # Crear carpeta temporal para las imágenes
-                with tempfile.TemporaryDirectory() as temp_dir:
-                    logger.info(f"Convirtiendo PDF a imagen...")
+                # Usar la ruta exacta donde se encuentra Poppler
+                poppler_path = r"C:\Python312\poppler-24.08.0\Library\bin"
+                logger.info(f"Usando Poppler desde: {poppler_path}")
+                
+                # Convertir primera página del PDF a imagen
+                images = convert_from_path(
+                    filepath, 
+                    first_page=1, 
+                    last_page=1,
+                    dpi=200,
+                    output_folder=temp_dir,
+                    thread_count=4,
+                    grayscale=False,
+                    size=(1786, 2526),  # Tamaño fijo de 1786x2526 píxeles
+                    fmt='jpeg',
+                    jpegopt={'quality': 95},
+                    poppler_path=poppler_path
+                )
+                
+                if not images:
+                    return jsonify({'success': False, 'error': 'No se pudo convertir el PDF a imagen'}), 500
                     
-                    # Convertir primera página del PDF a imagen
-                    images = convert_from_path(
-                        filepath, 
-                        first_page=1, 
-                        last_page=1,
-                        dpi=300,
-                        output_folder=temp_dir,
-                        thread_count=4,
-                        grayscale=False,
-                        size=(1786, 2526),  # Tamaño fijo de 1786x2526 píxeles
-                        fmt='jpeg',
-                        jpegopt={'quality': 95}
-                    )
-                    
-                    if not images:
-                        return jsonify({'success': False, 'error': 'No se pudo convertir el PDF a imagen'}), 500
-                        
-                    # Verificar tamaño de la imagen
-                    image = images[0]
-                    width, height = image.size
-                    if width != 1786 or height != 2526:
-                        logger.warning(f"Imagen convertida con tamaño incorrecto: {width}x{height} (debería ser 1786x2526)")
-                        return jsonify({'success': False, 'error': 'Error en la conversión del PDF: tamaño incorrecto'}), 400
-                        
-                    # Guardar la imagen convertida
-                    image_filename = f"{session_id}_converted.jpg"
-                    image_path = os.path.join(current_app.config['UPLOAD_FOLDER'], image_filename)
-                    images[0].save(image_path, 'JPEG')
-                    logger.info(f"Imagen convertida guardada: {image_path}")
-                    
-                    # Guardar ruta de la imagen en la sesión
-                    session.image_path = image_path
-                    
+                # Verificar tamaño de la imagen
+                image = images[0]
+                width, height = image.size
+                if width != 1786 or height != 2526:
+                    logger.warning(f"Imagen convertida con tamaño incorrecto: {width}x{height} (debería ser 1786x2526)")
+                    return jsonify({'success': False, 'error': 'Error en la conversión del PDF: tamaño incorrecto'}), 400
+                
+                # Guardar la imagen convertida
+                image_filename = f"{session_id}_converted.jpg"
+                image_path = os.path.join(current_app.config['UPLOAD_FOLDER'], image_filename)
+                image.save(image_path, 'JPEG', quality=95)
+                logger.info(f"Imagen convertida guardada: {image_path} (tamaño: {width}x{height})")
+                
+                # Guardar ruta de la imagen en la sesión
+                session.image_path = image_path
+                
             except Exception as e:
                 logger.error(f"Error al convertir PDF: {str(e)}", exc_info=True)
                 return jsonify({'success': False, 'error': f'Error al procesar PDF: {str(e)}'}), 500
