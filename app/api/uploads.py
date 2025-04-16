@@ -10,6 +10,7 @@ from app.config import settings
 from app.session import create_session
 from app.core.processors.handwriting import HandwritingProcessor
 from app.core.processors.mark import MarkProcessor
+from PIL import Image
 
 logger = logging.getLogger(__name__)
 
@@ -188,7 +189,7 @@ def upload_pdf():
                         logger.info("Linux: Usando Poppler del sistema")
                         conversion_args = {}
                     
-                    # Convertir primera página del PDF a imagen
+                    # Convertir primera página del PDF a imagen con alta resolución
                     images = convert_from_path(
                         filepath, 
                         first_page=1, 
@@ -197,7 +198,6 @@ def upload_pdf():
                         output_folder=temp_dir,
                         thread_count=4,
                         grayscale=False,
-                        size=(1786, 2526),  # Tamaño fijo de 1786x2526 píxeles
                         fmt='jpeg',
                         jpegopt={'quality': 95},
                         **conversion_args
@@ -205,19 +205,27 @@ def upload_pdf():
                     
                     if not images:
                         return jsonify({'success': False, 'error': 'No se pudo convertir el PDF a imagen'}), 500
-                        
-                    # Verificar tamaño de la imagen
+                    
+                    # Obtener la primera imagen
                     image = images[0]
+                    
+                    # Redimensionar la imagen al tamaño exacto requerido
+                    target_size = (1786, 2526)
+                    image = image.resize(target_size, Image.Resampling.LANCZOS)
+                    
+                    # Verificar tamaño después del redimensionamiento
                     width, height = image.size
-                    if width != 1786 or height != 2526:
-                        logger.warning(f"Imagen convertida con tamaño incorrecto: {width}x{height} (debería ser 1786x2526)")
-                        return jsonify({'success': False, 'error': 'Error en la conversión del PDF: tamaño incorrecto'}), 400
+                    if width != target_size[0] or height != target_size[1]:
+                        logger.error(f"Error al redimensionar: {width}x{height} (debería ser {target_size[0]}x{target_size[1]})")
+                        return jsonify({'success': False, 'error': 'Error al redimensionar la imagen'}), 400
+                    
+                    logger.info(f"Imagen redimensionada correctamente a {width}x{height}")
                     
                     # Guardar la imagen convertida
                     image_filename = f"{session_id}_converted.jpg"
                     image_path = os.path.join(current_app.config['UPLOAD_FOLDER'], image_filename)
                     image.save(image_path, 'JPEG', quality=95)
-                    logger.info(f"Imagen convertida guardada: {image_path} (tamaño: {width}x{height})")
+                    logger.info(f"Imagen convertida guardada: {image_path}")
                     
                     # Guardar ruta de la imagen en la sesión
                     session.image_path = image_path
