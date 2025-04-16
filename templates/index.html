@@ -84,6 +84,35 @@
         .result-value {
             flex: 1;
         }
+        .mark-checked {
+            background-color: rgba(76, 175, 80, 0.1);
+        }
+        .mark-unchecked {
+            background-color: rgba(244, 67, 54, 0.1);
+        }
+        .badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 0.8em;
+            margin-left: 5px;
+        }
+        .badge-text {
+            background-color: #3498db;
+            color: white;
+        }
+        .badge-mark {
+            background-color: #f39c12;
+            color: white;
+        }
+        .processing-indicator {
+            text-align: center;
+            padding: 20px;
+        }
+        .processing-indicator img {
+            width: 50px;
+            height: 50px;
+        }
     </style>
 </head>
 <body>
@@ -137,6 +166,12 @@
                     <p>Primero carga el archivo JSON de zonas...</p>
                 </div>
             </div>
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" id="selectAllFields">
+                    Seleccionar todos los campos
+                </label>
+            </div>
             <button id="recognizeBtn" disabled>Reconocer Campos</button>
             <div id="results" class="results-container"></div>
         </div>
@@ -162,6 +197,7 @@
         const results = document.getElementById('results');
         const opacitySlider = document.getElementById('opacity');
         const drawLabelsCheckbox = document.getElementById('drawLabels');
+        const selectAllFieldsCheckbox = document.getElementById('selectAllFields');
 
         // Evento para subir el archivo JSON
         uploadJsonBtn.addEventListener('click', async () => {
@@ -274,6 +310,14 @@
             }
         });
 
+        // Evento para "Seleccionar todos los campos"
+        selectAllFieldsCheckbox.addEventListener('change', function() {
+            const checkboxes = document.querySelectorAll('#fieldsList input[type="checkbox"]');
+            checkboxes.forEach(checkbox => {
+                checkbox.checked = this.checked;
+            });
+        });
+
         // Evento para el botón de reconocimiento
         recognizeBtn.addEventListener('click', async () => {
             if (!sessionId) {
@@ -295,9 +339,14 @@
             formData.append('fields', JSON.stringify(selectedFields));
 
             try {
-                results.innerHTML = '<p>Procesando... por favor espere.</p>';
+                results.innerHTML = `
+                    <div class="processing-indicator">
+                        <p>Procesando... por favor espere.</p>
+                        <div class="spinner"></div>
+                    </div>`;
                 
-                const response = await fetch('/api/recognize-text', {
+                // Usar el nuevo endpoint que procesa tanto texto como marcas
+                const response = await fetch('/api/recognize-all', {
                     method: 'POST',
                     body: formData
                 });
@@ -305,16 +354,35 @@
                 const data = await response.json();
 
                 if (data.success) {
-                    // Mostrar solo los resultados sin las imágenes
+                    // Mostrar los resultados
                     let resultsHtml = '<h3>Resultados:</h3>';
-                    for (const [field, value] of Object.entries(data.results)) {
+                    
+                    for (const [field, info] of Object.entries(data.results)) {
+                        const fieldType = info.type || 'unknown';
+                        const fieldValue = info.value || '';
+                        const isMarked = info.marked;
+                        let confidence = info.confidence || 0;
+                        confidence = (confidence * 100).toFixed(2);
+                        
+                        // Determinar la clase y badge según el tipo de campo
+                        let itemClass = '';
+                        let badgeHtml = '';
+                        
+                        if (fieldType === 'mark') {
+                            itemClass = isMarked ? 'mark-checked' : 'mark-unchecked';
+                            badgeHtml = '<span class="badge badge-mark">Marca</span>';
+                        } else {
+                            badgeHtml = '<span class="badge badge-text">Texto</span>';
+                        }
+                        
                         resultsHtml += `
-                            <div class="result-item">
-                                <div class="result-field">${field}:</div>
-                                <div class="result-value">${value}</div>
+                            <div class="result-item ${itemClass}">
+                                <div class="result-field">${field}:${badgeHtml}</div>
+                                <div class="result-value">${fieldValue} ${fieldType === 'mark' ? '(Confianza: ' + confidence + '%)' : ''}</div>
                             </div>
                         `;
                     }
+                    
                     results.innerHTML = resultsHtml;
                 } else {
                     results.innerHTML = `<p style="color: red;">Error: ${data.error}</p>`;
@@ -341,6 +409,7 @@
                             <label>
                                 <input type="checkbox" value="${field}" checked>
                                 <span class="checkbox-label">${field}</span>
+                                <span class="badge badge-text">Texto</span>
                             </label>
                         </div>
                     `;
@@ -353,8 +422,9 @@
                     html += `
                         <div>
                             <label>
-                                <input type="checkbox" value="${field}">
+                                <input type="checkbox" value="${field}" checked>
                                 <span class="checkbox-label">${field}</span>
+                                <span class="badge badge-mark">Marca</span>
                             </label>
                         </div>
                     `;
@@ -365,6 +435,30 @@
             fieldsList.innerHTML = html;
             recognizeBtn.disabled = false;
         }
+
+        // CSS para el spinner
+        const style = document.createElement('style');
+        style.textContent = `
+            .spinner {
+                border: 4px solid rgba(0, 0, 0, 0.1);
+                width: 36px;
+                height: 36px;
+                border-radius: 50%;
+                border-left-color: #4CAF50;
+                animation: spin 1s linear infinite;
+                margin: 10px auto;
+            }
+            
+            @keyframes spin {
+                0% {
+                    transform: rotate(0deg);
+                }
+                100% {
+                    transform: rotate(360deg);
+                }
+            }
+        `;
+        document.head.appendChild(style);
     </script>
 </body>
 </html>

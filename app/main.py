@@ -2,9 +2,6 @@ import os
 import sys
 import logging
 from flask import Flask
-from fastapi import FastAPI
-from fastapi.middleware.wsgi import WSGIMiddleware
-from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 
 # Cargar variables de entorno antes de importar otros módulos
@@ -20,14 +17,14 @@ logger = logging.getLogger(__name__)
 
 # Importaciones internas
 from app.config import settings
-from app.api import routes_bp, uploads_bp, processing_router
+from app.api import routes_bp, uploads_bp, processing_bp
 from app.core.processors.handwriting import HandwritingProcessor
 from app.core.processors.mark import MarkProcessor
 
-def create_flask_app():
+def create_app():
     """Crear y configurar la aplicación Flask"""
     app = Flask(__name__, 
-                static_folder=None,  # Desactivamos el servido de estáticos en Flask
+                static_folder=str(settings.STATIC_FOLDER),
                 template_folder=str(settings.TEMPLATE_FOLDER))
     
     # Configuración de la aplicación
@@ -41,23 +38,9 @@ def create_flask_app():
     # Registrar blueprints
     app.register_blueprint(routes_bp)
     app.register_blueprint(uploads_bp)
+    app.register_blueprint(processing_bp)
     
     return app
-
-# Crear una instancia global de FastAPI
-app = FastAPI(title="SimplyExam API")
-
-def setup_app():
-    """Configurar la aplicación FastAPI"""
-    # Configurar servido de archivos estáticos
-    app.mount("/static", StaticFiles(directory=str(settings.STATIC_FOLDER)), name="static")
-    
-    # Incluir routers
-    app.include_router(processing_router)
-    
-    # Crear y montar la aplicación Flask
-    flask_app = create_flask_app()
-    app.mount("/", WSGIMiddleware(flask_app))
 
 def initialize_processors():
     """Inicializar procesadores para que estén listos"""
@@ -75,25 +58,20 @@ def initialize_processors():
         logger.error(f"Error al inicializar procesadores: {e}", exc_info=True)
         raise
 
-# Configurar la aplicación
-initialize_processors()
-setup_app()
-
 def main():
     """Función principal para ejecutar la aplicación"""
     try:
+        # Inicializar procesadores
+        initialize_processors()
+        
+        # Crear aplicación Flask
+        app = create_app()
+        
         # Configuración del puerto
         port = int(os.environ.get('PORT', 5000))
         
-        # Iniciar el servidor con uvicorn
-        import uvicorn
-        uvicorn.run(
-            "app.main:app",  # Ruta de importación a la instancia de FastAPI
-            host='0.0.0.0',
-            port=port,
-            reload=True,
-            reload_dirs=["app"]  # Solo observar cambios en el directorio app
-        )
+        # Iniciar el servidor de desarrollo Flask
+        app.run(host='0.0.0.0', port=port, debug=True, use_reloader=False)
         
     except Exception as e:
         logger.error(f"Error al iniciar la aplicación: {e}", exc_info=True)
