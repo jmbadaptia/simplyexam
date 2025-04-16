@@ -435,19 +435,33 @@
                     Object.keys(respuestas).map(key => parseInt(key.match(/^\d+/)[0]))
                 )].sort((a, b) => a - b);
 
+                // Determinar las columnas disponibles (A, B, C, etc.)
+                const columnas = [...new Set(
+                    Object.keys(respuestas)
+                        .map(key => key.match(/^\d+([A-Z])$/)[1])
+                        .filter(Boolean)
+                )].sort();
+
                 resultsHtml += '<div class="results-section">';
                 resultsHtml += '<h3>Respuestas:</h3>';
                 resultsHtml += '<table class="results-table">';
-                resultsHtml += '<thead><tr><th>Pregunta</th><th>A</th><th>B</th><th>C</th><th>D</th><th>E</th></tr></thead>';
+                
+                // Crear encabezado dinámico
+                resultsHtml += '<thead><tr><th>Pregunta</th>';
+                for (const columna of columnas) {
+                    resultsHtml += `<th>${columna}</th>`;
+                }
+                resultsHtml += '</tr></thead>';
+                
                 resultsHtml += '<tbody>';
 
                 // Crear una fila para cada número de pregunta
                 for (const numPregunta of numerosPreguntas) {
                     resultsHtml += `<tr><td>${numPregunta}</td>`;
                     
-                    // Para cada letra posible (A, B, C, D, E)
-                    for (const letra of ['A', 'B', 'C', 'D', 'E']) {
-                        const clave = `${numPregunta}${letra}`;
+                    // Para cada columna disponible
+                    for (const columna of columnas) {
+                        const clave = `${numPregunta}${columna}`;
                         if (clave in respuestas) {
                             const info = respuestas[clave];
                             const isMarcado = info.marked;
@@ -465,10 +479,24 @@
 
             // Mostrar reservas si existen
             if (Object.keys(reservas).length > 0) {
+                // Determinar las columnas disponibles para reservas
+                const columnasReserva = [...new Set(
+                    Object.keys(reservas)
+                        .map(key => key.match(/^R\d+([A-Z])$/)[1])
+                        .filter(Boolean)
+                )].sort();
+
                 resultsHtml += '<div class="results-section">';
                 resultsHtml += '<h3>Preguntas de Reserva:</h3>';
                 resultsHtml += '<table class="results-table">';
-                resultsHtml += '<thead><tr><th>Pregunta</th><th>A</th><th>B</th><th>C</th><th>D</th><th>E</th></tr></thead>';
+                
+                // Crear encabezado dinámico para reservas
+                resultsHtml += '<thead><tr><th>Pregunta</th>';
+                for (const columna of columnasReserva) {
+                    resultsHtml += `<th>${columna}</th>`;
+                }
+                resultsHtml += '</tr></thead>';
+                
                 resultsHtml += '<tbody>';
 
                 // Obtener todos los números de pregunta únicos de reserva
@@ -485,9 +513,9 @@
                 for (const numPregunta of numerosReserva) {
                     resultsHtml += `<tr><td>R${numPregunta}</td>`;
                     
-                    // Para cada letra posible (A, B, C, D, E)
-                    for (const letra of ['A', 'B', 'C', 'D', 'E']) {
-                        const clave = `R${numPregunta}${letra}`;
+                    // Para cada columna disponible
+                    for (const columna of columnasReserva) {
+                        const clave = `R${numPregunta}${columna}`;
                         if (clave in reservas) {
                             const info = reservas[clave];
                             const isMarcado = info.marked;

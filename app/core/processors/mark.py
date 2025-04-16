@@ -70,14 +70,14 @@ class MarkProcessor:
                 gray = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_LINEAR)
                 
             # Aplicar CLAHE para mejorar el contraste local
-            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+            clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
             equalized = clahe.apply(gray)
                 
             # Normalizar la imagen para mejorar el contraste global
             normalized = cv2.normalize(equalized, None, 0, 255, cv2.NORM_MINMAX)
             
             # Reducir ruido con filtro de mediana
-            denoised = cv2.medianBlur(normalized, 3)
+            denoised = cv2.medianBlur(normalized, 5)
             
             # Detectar el umbral óptimo usando el método de Otsu si la ROI es lo suficientemente grande
             if denoised.size > 100:
@@ -99,7 +99,7 @@ class MarkProcessor:
                 )
             
             # Operaciones morfológicas para limpiar ruido y fortalecer marcas
-            kernel = np.ones((2, 2), np.uint8)
+            kernel = np.ones((3, 3), np.uint8)
             cleaned = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
             
             # Cerrar pequeños huecos en las marcas
@@ -269,22 +269,22 @@ class MarkProcessor:
                 threshold = self._thresholds[field_name]
             elif shape_type == 'circle':
                 # Los círculos suelen requerir un umbral más bajo
-                threshold = getattr(settings, 'CIRCLE_MARK_THRESHOLD', 15)
+                threshold = getattr(settings, 'CIRCLE_MARK_THRESHOLD', 10)  # Reducido de 15 a 10
             else:
-                threshold = getattr(settings, 'MARK_THRESHOLD', 20)
+                threshold = getattr(settings, 'MARK_THRESHOLD', 15)  # Reducido de 20 a 15
                 
             # Ajuste dinámico del umbral basado en el tamaño
             area = w * h
             if area < 400:  # ROI pequeña (menos de 20x20)
-                threshold *= 0.8  # Reducir el umbral en un 20%
+                threshold *= 0.7  # Reducir el umbral en un 30%
             
             # Ajuste adicional basado en la distribución espacial
             if 'spatial_distribution' in metadata:
                 x_std, y_std = metadata['spatial_distribution']
                 if x_std < 0.2 or y_std < 0.2:  # Distribución muy concentrada
-                    threshold *= 1.2  # Aumentar el umbral
+                    threshold *= 1.1  # Aumentar el umbral en un 10%
                 elif x_std > 0.4 or y_std > 0.4:  # Distribución muy dispersa
-                    threshold *= 0.8  # Reducir el umbral
+                    threshold *= 0.9  # Reducir el umbral en un 10%
             
             is_marked = mark_percentage > threshold
             
