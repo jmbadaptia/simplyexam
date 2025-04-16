@@ -429,6 +429,8 @@ def recognize_marks():
         logger.error(f"Error en reconocimiento de marcas: {e}", exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
 
+# Reemplazar solo la función recognize_all en processing.py
+
 @processing_bp.route('/api/recognize-all', methods=['POST'])
 def recognize_all():
     """Reconocer tanto texto como marcas en un solo endpoint"""
@@ -467,72 +469,143 @@ def recognize_all():
         # Resultados combinados
         combined_results = {}
         
+        # Validar sesión
+        session = get_session(session_id)
+        if not session:
+            return jsonify({"success": False, "error": "Sesión no válida"}), 400
+            
+        if not session.image_path:
+            return jsonify({"success": False, "error": "No hay imagen cargada"}), 400
+            
+        # Verificar si se debe procesar primero el paso de overlay
+        if 'overlay' not in session.completed_steps:
+            logger.info("El paso overlay no se ha completado, ejecutándolo automáticamente...")
+            # Ejecutar overlay automáticamente
+            overlay_result = overlay_zones()
+            if isinstance(overlay_result, tuple) and overlay_result[1] != 200:
+                return overlay_result
+                
+        # Verificar que hay ROIs definidas
+        if not hasattr(session, 'rois') or not session.rois:
+            return jsonify({"success": False, "error": "No hay ROIs definidas en la sesión"}), 400
+            
+        logger.info(f"ROIs disponibles en sesión: {session.rois.keys()}")
+        
+        # Leer imagen para extraer ROIs
+        image_path = session.image_path
+        if not os.path.exists(image_path):
+            return jsonify({"success": False, "error": "Imagen no encontrada"}), 400
+            
+        image = cv2.imread(image_path)
+        if image is None:
+            return jsonify({"success": False, "error": "Error al leer la imagen"}), 400
+            
         # Procesar marcas si hay campos de ese tipo
         if mark_fields:
-            try:
-                # Crear un formulario para marcas
-                mark_form_data = {
-                    'session_id': session_id,
-                    'fields': json.dumps(mark_fields)
-                }
-                
-                # Llamar al endpoint de marcas con los datos
-                from flask import url_for
-                with current_app.test_client() as client:
-                    mark_response = client.post(
-                        '/api/recognize-marks',
-                        data=mark_form_data
-                    )
+            logger.info(f"Procesando {len(mark_fields)} campos de marca: {mark_fields[:5]}...")
+            
+            # Obtener ROIs para los campos de marca
+            mark_rois = []
+            mark_roi_fields = []
+            
+            for field in mark_fields:
+                if field in session.rois:
+                    roi_coords = session.rois[field]
+                    x, y, w, h = map(int, roi_coords)
+                    roi = image[y:y+h, x:x+w]
+                    if roi is not None and roi.size > 0:
+                        mark_rois.append(roi)
+                        mark_roi_fields.append(field)
+                    else:
+                        logger.warning(f"ROI inválida para el campo de marca {field}")
+                else:
+                    logger.warning(f"Campo de marca {field} no encontrado en las ROIs disponibles")
                     
-                # Procesar la respuesta
-                mark_data = json.loads(mark_response.data)
-                
-                if mark_data.get('success'):
-                    # Integrar resultados de marcas
-                    mark_results = mark_data.get('results', {})
-                    for field, result in mark_results.items():
-                        combined_results[field] = {
+            if mark_rois:
+                try:
+                    # Preparar directorio para debug
+                    debug_dir = os.path.join(settings.RESULTS_FOLDER, f"debug_{session_id}")
+                    os.makedirs(debug_dir, exist_ok=True)
+                    
+                    # Configurar procesador de marcas
+                    processor = MarkProcessor()
+                    processor.set_mark_fields(set(mark_roi_fields))
+                    processor.set_debug_folder(debug_dir)
+                    
+                    # Detectar automáticamente el tipo de marca según sus dimensiones
+                    mark_types = {}
+                    for field, roi in zip(mark_roi_fields, mark_rois):
+                        h, w = roi.shape[:2]
+                        aspect_ratio = w / h if h > 0 else 1
+                        
+                        if 0.8 <= aspect_ratio <= 1.2:  # Es casi cuadrado
+                            if max(w, h) < 30:  # Es pequeño
+                                mark_types[field] = 'circle'
+                            else:
+                                mark_types[field] = 'square'
+                        else:
+                            mark_types[field] = 'square'
+                            
+                    processor.set_mark_types(mark_types)
+                    
+                    # Procesar ROIs de marcas
+                    results_dict, details = processor.process_batch(mark_rois, mark_roi_fields)
+                    
+                    # Formatear resultados para el frontend
+                    for field_name, is_marked in results_dict.items():
+                        detail = details.get(field_name, {})
+                        percentage = detail.get('percentage', 0.0)
+                        
+                        combined_results[field_name] = {
                             'type': 'mark',
-                            'value': result.get('value'),
-                            'marked': result.get('marked'),
-                            'confidence': result.get('confidence', 0.0),
-                            'percentage': result.get('percentage', 0.0)
+                            'value': 'MARCADO' if is_marked else 'NO MARCADO',
+                            'marked': is_marked,
+                            'confidence': percentage / 100.0,
+                            'percentage': percentage
                         }
-            except Exception as e:
-                logger.error(f"Error procesando marcas en reconocimiento combinado: {e}")
-                # Continuar con el texto aunque las marcas fallen
+                    
+                    logger.info(f"Procesados {len(results_dict)} campos de marca")
+                except Exception as e:
+                    logger.error(f"Error procesando marcas: {e}", exc_info=True)
         
         # Procesar texto si hay campos de ese tipo
         if text_fields:
-            try:
-                # Crear un formulario para texto
-                text_form_data = {
-                    'session_id': session_id,
-                    'fields': json.dumps(text_fields)
-                }
-                
-                # Llamar al endpoint de texto con los datos
-                with current_app.test_client() as client:
-                    text_response = client.post(
-                        '/api/recognize-text',
-                        data=text_form_data
-                    )
+            logger.info(f"Procesando {len(text_fields)} campos de texto: {text_fields}")
+            
+            # Obtener ROIs para los campos de texto
+            text_rois = []
+            text_roi_fields = []
+            
+            for field in text_fields:
+                if field in session.rois:
+                    roi_coords = session.rois[field]
+                    x, y, w, h = map(int, roi_coords)
+                    roi = image[y:y+h, x:x+w]
+                    if roi is not None and roi.size > 0:
+                        text_rois.append(roi)
+                        text_roi_fields.append(field)
+                    else:
+                        logger.warning(f"ROI inválida para el campo de texto {field}")
+                else:
+                    logger.warning(f"Campo de texto {field} no encontrado en las ROIs disponibles")
                     
-                # Procesar la respuesta
-                text_data = json.loads(text_response.data)
-                
-                if text_data.get('success'):
+            if text_rois:
+                try:
+                    # Procesar texto con Claude
+                    processor = HandwritingProcessor()
+                    text_results = processor.process_batch(text_rois, text_roi_fields, session.id)
+                    
                     # Integrar resultados de texto
-                    text_results = text_data.get('results', {})
                     for field, value in text_results.items():
                         combined_results[field] = {
                             'type': 'text',
                             'value': value,
                             'confidence': 0.95  # Valor por defecto para Claude
                         }
-            except Exception as e:
-                logger.error(f"Error procesando texto en reconocimiento combinado: {e}")
-                # Continuar aunque el texto falle
+                    
+                    logger.info(f"Procesados {len(text_results)} campos de texto")
+                except Exception as e:
+                    logger.error(f"Error procesando texto: {e}", exc_info=True)
         
         # Construir respuesta final
         response_data = {
@@ -544,6 +617,7 @@ def recognize_all():
             }
         }
         
+        logger.info(f"Procesados un total de {len(combined_results)} campos.")
         return jsonify(response_data)
         
     except Exception as e:
