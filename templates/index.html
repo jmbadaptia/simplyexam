@@ -84,12 +84,6 @@
         .result-value {
             flex: 1;
         }
-        .mark-checked {
-            background-color: rgba(76, 175, 80, 0.1);
-        }
-        .mark-unchecked {
-            background-color: rgba(244, 67, 54, 0.1);
-        }
         .badge {
             display: inline-block;
             padding: 3px 8px;
@@ -105,13 +99,83 @@
             background-color: #f39c12;
             color: white;
         }
+        
+        /* Estilos para los resultados organizados */
+        .results-section {
+            margin-bottom: 30px;
+        }
+        
+        .results-section h3 {
+            margin-bottom: 15px;
+            border-bottom: 2px solid #4CAF50;
+            padding-bottom: 5px;
+            color: #333;
+        }
+        
+        .results-manuscript {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 10px;
+        }
+        
+        .results-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+            box-shadow: 0 2px 3px rgba(0,0,0,0.1);
+        }
+        
+        .results-table th, .results-table td {
+            padding: 10px;
+            text-align: center;
+            border: 1px solid #ddd;
+        }
+        
+        .results-table th {
+            background-color: #f2f2f2;
+            font-weight: bold;
+        }
+        
+        .results-table tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+        
+        .results-table tr:hover {
+            background-color: #f1f1f1;
+        }
+        
+        .marked {
+            background-color: rgba(76, 175, 80, 0.2);
+            color: #2e7d32;
+            font-weight: bold;
+        }
+        
+        .unmarked {
+            color: #d32f2f;
+        }
+        
+        .spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border-left-color: #4CAF50;
+            animation: spin 1s linear infinite;
+            margin: 10px auto;
+        }
+        
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+        
         .processing-indicator {
             text-align: center;
             padding: 20px;
-        }
-        .processing-indicator img {
-            width: 50px;
-            height: 50px;
         }
     </style>
 </head>
@@ -318,6 +382,150 @@
             });
         });
 
+        // Función para organizar y mostrar los resultados en el formato solicitado
+        function displayOrganizedResults(resultsData) {
+            // Separar los resultados por tipo
+            const manuscritos = {};
+            const respuestas = {};
+            const reservas = {};
+            const otros = {};
+
+            // Clasificar resultados
+            for (const [field, info] of Object.entries(resultsData)) {
+                if (field.startsWith('R')) {
+                    reservas[field] = info;
+                } else if (/^\d+[A-Z]$/.test(field)) {
+                    // Campo que sigue el patrón de número seguido de letra (1A, 2B, etc.)
+                    respuestas[field] = info;
+                } else if (field.startsWith('D')) {
+                    // Ignorar campos que empiezan por D
+                    continue;
+                } else if (info.type === 'text' || field.length >= 4 || field === 'DNI') {
+                    // Campos manuscritos
+                    manuscritos[field] = info;
+                } else {
+                    otros[field] = info;
+                }
+            }
+
+            // Crear HTML para la sección de manuscritos
+            let resultsHtml = '<div class="results-section">';
+            resultsHtml += '<h3>Campos Manuscritos:</h3>';
+            
+            if (Object.keys(manuscritos).length > 0) {
+                resultsHtml += '<div class="results-manuscript">';
+                for (const [field, info] of Object.entries(manuscritos)) {
+                    resultsHtml += `
+                        <div class="result-item">
+                            <div class="result-field">${field}:</div>
+                            <div class="result-value">${info.value || ''}</div>
+                        </div>
+                    `;
+                }
+                resultsHtml += '</div>';
+            } else {
+                resultsHtml += '<p>No hay campos manuscritos.</p>';
+            }
+            resultsHtml += '</div>';
+
+            // Organizar respuestas por filas
+            if (Object.keys(respuestas).length > 0) {
+                // Obtener todos los números de pregunta únicos
+                const numerosPreguntas = [...new Set(
+                    Object.keys(respuestas).map(key => parseInt(key.match(/^\d+/)[0]))
+                )].sort((a, b) => a - b);
+
+                resultsHtml += '<div class="results-section">';
+                resultsHtml += '<h3>Respuestas:</h3>';
+                resultsHtml += '<table class="results-table">';
+                resultsHtml += '<thead><tr><th>Pregunta</th><th>A</th><th>B</th><th>C</th><th>D</th><th>E</th></tr></thead>';
+                resultsHtml += '<tbody>';
+
+                // Crear una fila para cada número de pregunta
+                for (const numPregunta of numerosPreguntas) {
+                    resultsHtml += `<tr><td>${numPregunta}</td>`;
+                    
+                    // Para cada letra posible (A, B, C, D, E)
+                    for (const letra of ['A', 'B', 'C', 'D', 'E']) {
+                        const clave = `${numPregunta}${letra}`;
+                        if (clave in respuestas) {
+                            const info = respuestas[clave];
+                            const isMarcado = info.marked;
+                            resultsHtml += `<td class="${isMarcado ? 'marked' : 'unmarked'}">${isMarcado ? '✓' : '✗'}</td>`;
+                        } else {
+                            resultsHtml += '<td>-</td>'; // Opción no presente
+                        }
+                    }
+                    
+                    resultsHtml += '</tr>';
+                }
+
+                resultsHtml += '</tbody></table></div>';
+            }
+
+            // Mostrar reservas si existen
+            if (Object.keys(reservas).length > 0) {
+                resultsHtml += '<div class="results-section">';
+                resultsHtml += '<h3>Preguntas de Reserva:</h3>';
+                resultsHtml += '<table class="results-table">';
+                resultsHtml += '<thead><tr><th>Pregunta</th><th>A</th><th>B</th><th>C</th><th>D</th><th>E</th></tr></thead>';
+                resultsHtml += '<tbody>';
+
+                // Obtener todos los números de pregunta únicos de reserva
+                const numerosReserva = [...new Set(
+                    Object.keys(reservas)
+                        .map(key => {
+                            const match = key.match(/^R(\d+)([A-Z])$/);
+                            return match ? parseInt(match[1]) : null;
+                        })
+                        .filter(num => num !== null)
+                )].sort((a, b) => a - b);
+
+                // Crear una fila para cada número de pregunta
+                for (const numPregunta of numerosReserva) {
+                    resultsHtml += `<tr><td>R${numPregunta}</td>`;
+                    
+                    // Para cada letra posible (A, B, C, D, E)
+                    for (const letra of ['A', 'B', 'C', 'D', 'E']) {
+                        const clave = `R${numPregunta}${letra}`;
+                        if (clave in reservas) {
+                            const info = reservas[clave];
+                            const isMarcado = info.marked;
+                            resultsHtml += `<td class="${isMarcado ? 'marked' : 'unmarked'}">${isMarcado ? '✓' : '✗'}</td>`;
+                        } else {
+                            resultsHtml += '<td>-</td>'; // Opción no presente
+                        }
+                    }
+                    
+                    resultsHtml += '</tr>';
+                }
+
+                resultsHtml += '</tbody></table></div>';
+            }
+
+            // Mostrar otros campos, si hay alguno que no se clasificó
+            if (Object.keys(otros).length > 0) {
+                resultsHtml += '<div class="results-section">';
+                resultsHtml += '<h3>Otros Campos:</h3>';
+                
+                for (const [field, info] of Object.entries(otros)) {
+                    const value = info.type === 'mark' 
+                        ? (info.marked ? 'MARCADO' : 'NO MARCADO') 
+                        : (info.value || '');
+                        
+                    resultsHtml += `
+                        <div class="result-item">
+                            <div class="result-field">${field}:</div>
+                            <div class="result-value">${value}</div>
+                        </div>
+                    `;
+                }
+                resultsHtml += '</div>';
+            }
+
+            return resultsHtml;
+        }
+
         // Evento para el botón de reconocimiento
         recognizeBtn.addEventListener('click', async () => {
             if (!sessionId) {
@@ -345,7 +553,7 @@
                         <div class="spinner"></div>
                     </div>`;
                 
-                // Usar el nuevo endpoint que procesa tanto texto como marcas
+                // Usar el endpoint que procesa tanto texto como marcas
                 const response = await fetch('/api/recognize-all', {
                     method: 'POST',
                     body: formData
@@ -354,36 +562,8 @@
                 const data = await response.json();
 
                 if (data.success) {
-                    // Mostrar los resultados
-                    let resultsHtml = '<h3>Resultados:</h3>';
-                    
-                    for (const [field, info] of Object.entries(data.results)) {
-                        const fieldType = info.type || 'unknown';
-                        const fieldValue = info.value || '';
-                        const isMarked = info.marked;
-                        let confidence = info.confidence || 0;
-                        confidence = (confidence * 100).toFixed(2);
-                        
-                        // Determinar la clase y badge según el tipo de campo
-                        let itemClass = '';
-                        let badgeHtml = '';
-                        
-                        if (fieldType === 'mark') {
-                            itemClass = isMarked ? 'mark-checked' : 'mark-unchecked';
-                            badgeHtml = '<span class="badge badge-mark">Marca</span>';
-                        } else {
-                            badgeHtml = '<span class="badge badge-text">Texto</span>';
-                        }
-                        
-                        resultsHtml += `
-                            <div class="result-item ${itemClass}">
-                                <div class="result-field">${field}:${badgeHtml}</div>
-                                <div class="result-value">${fieldValue} ${fieldType === 'mark' ? '(Confianza: ' + confidence + '%)' : ''}</div>
-                            </div>
-                        `;
-                    }
-                    
-                    results.innerHTML = resultsHtml;
+                    // Usar la nueva función para mostrar resultados organizados
+                    results.innerHTML = displayOrganizedResults(data.results);
                 } else {
                     results.innerHTML = `<p style="color: red;">Error: ${data.error}</p>`;
                 }
@@ -435,30 +615,6 @@
             fieldsList.innerHTML = html;
             recognizeBtn.disabled = false;
         }
-
-        // CSS para el spinner
-        const style = document.createElement('style');
-        style.textContent = `
-            .spinner {
-                border: 4px solid rgba(0, 0, 0, 0.1);
-                width: 36px;
-                height: 36px;
-                border-radius: 50%;
-                border-left-color: #4CAF50;
-                animation: spin 1s linear infinite;
-                margin: 10px auto;
-            }
-            
-            @keyframes spin {
-                0% {
-                    transform: rotate(0deg);
-                }
-                100% {
-                    transform: rotate(360deg);
-                }
-            }
-        `;
-        document.head.appendChild(style);
     </script>
 </body>
 </html>

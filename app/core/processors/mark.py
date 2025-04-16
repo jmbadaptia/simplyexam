@@ -15,6 +15,7 @@ class MarkProcessor:
         self._mark_fields = set()
         self._debug_folder = None
         self._mark_types = {}  # Almacena tipos de marca (círculo, cuadrado)
+        self._thresholds = {}  # Umbrales específicos por campo
         
     def initialize(self):
         """Inicializar el procesador de marcas"""
@@ -61,27 +62,51 @@ class MarkProcessor:
             else:
                 gray = roi
                 
+            # Aplicar una ecualización del histograma para mejorar el contraste
+            equalized = cv2.equalizeHist(gray)
+                
             # Normalizar la imagen para mejorar el contraste
-            normalized = cv2.normalize(gray, None, 0, 255, cv2.NORM_MINMAX)
+            normalized = cv2.normalize(equalized, None, 0, 255, cv2.NORM_MINMAX)
             
             # Reducir ruido con filtro gaussiano
             denoised = cv2.GaussianBlur(normalized, (3, 3), 0)
             
-            # Aplicar umbral adaptativo (más sensible a marcas débiles)
-            binary = cv2.adaptiveThreshold(
-                denoised, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                cv2.THRESH_BINARY_INV, 11, 2
-            )
+            # Detectar el umbral óptimo usando el método de Otsu si la ROI es lo suficientemente grande
+            if denoised.size > 100:
+                _, binary_otsu = cv2.threshold(denoised, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+                
+                # Combinar con umbral adaptativo para mejorar la sensibilidad
+                binary_adaptive = cv2.adaptiveThreshold(
+                    denoised, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                    cv2.THRESH_BINARY_INV, 11, 2
+                )
+                
+                # Combinar los dos métodos
+                binary = cv2.bitwise_and(binary_otsu, binary_adaptive)
+            else:
+                # Para ROIs pequeñas, usar solo el umbral adaptativo
+                binary = cv2.adaptiveThreshold(
+                    denoised, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                    cv2.THRESH_BINARY_INV, 11, 2
+                )
             
-            # Operaciones morfológicas para limpiar ruido
+            # Operaciones morfológicas para limpiar ruido y fortalecer marcas
             kernel = np.ones((2, 2), np.uint8)
             cleaned = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
+            
+            # Cerrar pequeños huecos en las marcas
+            kernel_close = np.ones((3, 3), np.uint8)
+            cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_CLOSE, kernel_close)
             
             # Guardar las etapas intermedias si estamos en modo debug
             if self._debug_folder and field_name:
                 base_filename = f"{field_name}_"
-                debug_path = os.path.join(self._debug_folder, f"{base_filename}processed.png")
-                cv2.imwrite(debug_path, cleaned)
+                cv2.imwrite(os.path.join(self._debug_folder, f"{base_filename}1_gray.png"), gray)
+                cv2.imwrite(os.path.join(self._debug_folder, f"{base_filename}2_equalized.png"), equalized)
+                cv2.imwrite(os.path.join(self._debug_folder, f"{base_filename}3_normalized.png"), normalized)
+                cv2.imwrite(os.path.join(self._debug_folder, f"{base_filename}4_denoised.png"), denoised)
+                cv2.imwrite(os.path.join(self._debug_folder, f"{base_filename}5_binary.png"), binary)
+                cv2.imwrite(os.path.join(self._debug_folder, f"{base_filename}6_cleaned.png"), cleaned)
                 
             return cleaned
             
@@ -127,11 +152,15 @@ class MarkProcessor:
             perimeter = cv2.arcLength(largest_contour, True)
             approx = cv2.approxPolyDP(largest_contour, 0.04 * perimeter, True)
             
-            # Si tiene ~4 vértices, es un cuadrado/rectángulo
-            if len(approx) <= 6:
-                return 'square', contours
-            else:
+            # Calcular circularidad
+            area = cv2.contourArea(largest_contour)
+            circularity = 4 * np.pi * area / (perimeter * perimeter) if perimeter > 0 else 0
+            
+            # Si tiene alta circularidad o muchos vértices, probablemente es un círculo
+            if circularity > 0.8 or len(approx) > 6:
                 return 'circle', contours
+            else:
+                return 'square', contours
                 
         except Exception as e:
             logger.error(f"Error en detección de forma: {e}")
@@ -155,6 +184,10 @@ class MarkProcessor:
             # Obtener tipo de marca (círculo o cuadrado)
             shape_type, contours = self.detect_shape(roi, field_name)
             metadata['shape_type'] = shape_type
+            
+            # Guardar tamaño original para referencia
+            h, w = roi.shape[:2] if len(roi.shape) >= 2 else (0, 0)
+            metadata['original_size'] = (w, h)
             
             # Preprocesar ROI
             processed_roi = self.preprocess_roi(roi, field_name)
@@ -195,12 +228,21 @@ class MarkProcessor:
                 mark_percentage = (marked_pixels / total_pixels) * 100
             
             # Determinar si está marcado según umbral correspondiente
-            if shape_type == 'circle':
+            if field_name in self._thresholds:
+                # Usar umbral específico para este campo si está definido
+                threshold = self._thresholds[field_name]
+            elif shape_type == 'circle':
                 # Los círculos suelen requerir un umbral más bajo
-                threshold = getattr(settings, 'CIRCLE_MARK_THRESHOLD', 25)
+                threshold = getattr(settings, 'CIRCLE_MARK_THRESHOLD', 15)  # Reducido de 25 a 15
             else:
-                threshold = getattr(settings, 'MARK_THRESHOLD', 30)
+                threshold = getattr(settings, 'MARK_THRESHOLD', 20)  # Reducido de 30 a 20
                 
+            # Ajuste dinámico del umbral basado en el tamaño
+            # ROIs más pequeñas necesitan un umbral más bajo
+            area = w * h
+            if area < 400:  # ROI pequeña (menos de 20x20)
+                threshold *= 0.8  # Reducir el umbral en un 20%
+            
             is_marked = mark_percentage > threshold
             
             # Guardar información en metadata
@@ -223,6 +265,7 @@ class MarkProcessor:
             # Loguear información
             logger.info(f"Procesamiento de marca {field_name}:")
             logger.info(f"- Tipo: {shape_type}")
+            logger.info(f"- Tamaño: {w}x{h}")
             logger.info(f"- Total píxeles: {processed_roi.size}")
             logger.info(f"- Píxeles marcados: {marked_pixels}")
             logger.info(f"- Porcentaje: {mark_percentage:.2f}%")
@@ -324,3 +367,14 @@ class MarkProcessor:
             logger.info("=" * 60)
             
         return results, mark_results
+        
+    def set_field_threshold(self, field_name: str, threshold: float):
+        """
+        Establecer un umbral personalizado para un campo específico
+        
+        Args:
+            field_name: Nombre del campo
+            threshold: Umbral personalizado (porcentaje)
+        """
+        self._thresholds[field_name] = threshold
+        logger.info(f"Umbral personalizado para {field_name}: {threshold}%")
