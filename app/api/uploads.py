@@ -186,12 +186,24 @@ def upload_pdf():
                         filepath, 
                         first_page=1, 
                         last_page=1,
-                        dpi=200,
-                        output_folder=temp_dir
+                        dpi=300,
+                        output_folder=temp_dir,
+                        thread_count=4,
+                        grayscale=False,
+                        size=(1786, 2526),  # Tamaño fijo de 1786x2526 píxeles
+                        fmt='jpeg',
+                        jpegopt={'quality': 95}
                     )
                     
                     if not images:
                         return jsonify({'success': False, 'error': 'No se pudo convertir el PDF a imagen'}), 500
+                        
+                    # Verificar tamaño de la imagen
+                    image = images[0]
+                    width, height = image.size
+                    if width != 1786 or height != 2526:
+                        logger.warning(f"Imagen convertida con tamaño incorrecto: {width}x{height} (debería ser 1786x2526)")
+                        return jsonify({'success': False, 'error': 'Error en la conversión del PDF: tamaño incorrecto'}), 400
                         
                     # Guardar la imagen convertida
                     image_filename = f"{session_id}_converted.jpg"
