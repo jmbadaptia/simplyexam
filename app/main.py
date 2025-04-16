@@ -77,5 +77,8 @@ def main():
         logger.error(f"Error al iniciar la aplicación: {e}", exc_info=True)
         sys.exit(1)
 
+# Crear una instancia de la aplicación a nivel de módulo para que pueda ser importada
+app = create_app()
+
 if __name__ == "__main__":
     main()
