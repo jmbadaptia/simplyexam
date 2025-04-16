@@ -3,20 +3,19 @@ import json
 import logging
 import base64
 import cv2
-from typing import List
-from fastapi import APIRouter, Request, Form, HTTPException, Depends
-from fastapi.responses import JSONResponse
+from flask import Blueprint, request, jsonify, current_app
+from werkzeug.exceptions import BadRequest
 from app.config import settings
 from app.core.utils.image_utils import overlay_zones_on_image
-from app.session import get_session, Session
+from app.session import get_session
 from app.core.processors.handwriting import HandwritingProcessor
 from app.core.processors.mark import MarkProcessor
-from fastapi import File, UploadFile
-from fastapi.encoders import jsonable_encoder
 
+# Configurar logger
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+# Crear blueprint
+processing_bp = Blueprint('processing', __name__)
 
 def is_text_field(field_name):
     """Determina si un campo es de texto basado en su nombre"""
@@ -33,21 +32,23 @@ def is_mark_field(field_name):
         return True
     return False
 
-@router.post('/api/overlay-zones')
-async def overlay_zones(
-    request: Request,
-    session_id: str = Form(...),
-    opacity: float = Form(0.4),
-    draw_labels: bool = Form(True)
-):
+@processing_bp.route('/api/overlay-zones', methods=['POST'])
+def overlay_zones():
     """Superponer zonas sobre la imagen"""
+    session_id = request.form.get('session_id')
+    opacity = float(request.form.get('opacity', 0.4))
+    draw_labels = request.form.get('draw_labels', 'true').lower() == 'true'
+    
+    if not session_id:
+        return jsonify({'success': False, 'error': 'ID de sesión no proporcionado'}), 400
+        
     session = get_session(session_id)
     if not session:
-        raise HTTPException(status_code=400, detail='Sesión no válida')
+        return jsonify({'success': False, 'error': 'Sesión no válida'}), 400
 
     required_steps = ['json_upload', 'pdf_upload']
     if not all(step in session.completed_steps for step in required_steps):
-        raise HTTPException(status_code=400, detail='Debe completar los pasos anteriores')
+        return jsonify({'success': False, 'error': 'Debe completar los pasos anteriores'}), 400
 
     try:
         image_path = session.image_path
@@ -114,26 +115,28 @@ async def overlay_zones(
         logger.info(f"URL de la imagen: {image_url}")
         logger.info(f"ROIs guardadas: {list(rois.keys())}")
 
-        return {
+        return jsonify({
             'success': True,
             'message': "Zonas superpuestas correctamente",
             'image_url': image_url,
             'result_filename': result_filename
-        }
+        })
 
     except Exception as e:
         logger.error(f"Error al superponer zonas: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        return jsonify({'success': False, 'error': str(e)}), 500
 
-@router.post('/api/get-fields')
-async def get_fields(
-    request: Request,
-    session_id: str = Form(...)
-):
+@processing_bp.route('/api/get-fields', methods=['POST'])
+def get_fields():
     """Obtener la lista de campos disponibles del JSON"""
+    session_id = request.form.get('session_id')
+    
+    if not session_id:
+        return jsonify({'success': False, 'error': 'ID de sesión no proporcionado'}), 400
+        
     session = get_session(session_id)
     if not session:
-        raise HTTPException(status_code=400, detail='Sesión no válida o expirada.')
+        return jsonify({'success': False, 'error': 'Sesión no válida o expirada.'}), 400
 
     try:
         # Usar los campos ya procesados en la sesión
@@ -145,74 +148,77 @@ async def get_fields(
 
         if not text_fields and not mark_fields:
             logger.warning("No se encontraron campos en el JSON")
-            return {'success': False, 'error': 'No se encontraron campos en el JSON'}
+            return jsonify({'success': False, 'error': 'No se encontraron campos en el JSON'})
 
-        return {
+        return jsonify({
             'success': True,
             'text_fields': sorted(text_fields),
             'mark_fields': sorted(mark_fields),
             'fields': sorted(text_fields + mark_fields)
-        }
+        })
 
     except Exception as e:
         logger.error(f"Error al obtener campos: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error al obtener campos: {str(e)}")
+        return jsonify({'success': False, 'error': f"Error al obtener campos: {str(e)}"}), 500
 
-@router.post('/api/recognize-text')
-async def recognize_text(
-    request: Request,
-    session_id: str = Form(...),
-    fields: str = Form(...)  # Recibimos los campos como un string JSON
-):
+@processing_bp.route('/api/recognize-text', methods=['POST'])
+def recognize_text():
     """Reconocer texto en las ROIs seleccionadas"""
     try:
+        # Obtener datos de la solicitud
+        session_id = request.form.get('session_id')
+        fields_json = request.form.get('fields')
+        
+        if not session_id:
+            return jsonify({"success": False, "error": "ID de sesión no proporcionado"}), 400
+            
+        if not fields_json:
+            return jsonify({"success": False, "error": "No se especificaron campos"}), 400
+            
         # Convertir el string JSON de campos a lista
         try:
-            fields_list = json.loads(fields)
+            fields_list = json.loads(fields_json)
             if not isinstance(fields_list, list):
                 fields_list = [fields_list]
         except json.JSONDecodeError:
             # Si no es JSON válido, asumimos que es un solo campo
-            fields_list = [fields]
+            fields_list = [fields_json]
 
         logger.info(f"Campos recibidos: {fields_list}")
 
         # Validar sesión y estado
         session = get_session(session_id)
         if not session:
-            raise HTTPException(status_code=400, detail="Sesión no válida")
+            return jsonify({"success": False, "error": "Sesión no válida"}), 400
             
         if not session.image_path:
-            raise HTTPException(status_code=400, detail="No hay imagen cargada")
+            return jsonify({"success": False, "error": "No hay imagen cargada"}), 400
 
         if not fields_list:
-            raise HTTPException(status_code=400, detail="No se seleccionaron campos")
+            return jsonify({"success": False, "error": "No se seleccionaron campos"}), 400
 
         # Verificar si se debe procesar primero el paso de overlay
         if 'overlay' not in session.completed_steps:
             logger.info("El paso overlay no se ha completado, ejecutándolo automáticamente...")
             # Ejecutar overlay automáticamente
-            await overlay_zones(
-                request=request,
-                session_id=session_id,
-                opacity=0.4,
-                draw_labels=True
-            )
+            overlay_result = overlay_zones()
+            if isinstance(overlay_result, tuple) and overlay_result[1] != 200:
+                return overlay_result
 
         # Verificar que hay ROIs definidas
         if not hasattr(session, 'rois') or not session.rois:
-            raise HTTPException(status_code=400, detail="No hay ROIs definidas en la sesión")
+            return jsonify({"success": False, "error": "No hay ROIs definidas en la sesión"}), 400
 
         logger.info(f"ROIs disponibles en sesión: {session.rois.keys()}")
         
         # Leer imagen para extraer ROIs
         image_path = session.image_path
         if not os.path.exists(image_path):
-            raise HTTPException(status_code=400, detail="Imagen no encontrada")
+            return jsonify({"success": False, "error": "Imagen no encontrada"}), 400
 
         image = cv2.imread(image_path)
         if image is None:
-            raise HTTPException(status_code=400, detail="Error al leer la imagen")
+            return jsonify({"success": False, "error": "Error al leer la imagen"}), 400
 
         # Filtrar solo campos de texto
         text_fields = []
@@ -221,7 +227,7 @@ async def recognize_text(
                 text_fields.append(field)
         
         if not text_fields:
-            raise HTTPException(status_code=400, detail="No se seleccionaron campos de texto válidos")
+            return jsonify({"success": False, "error": "No se seleccionaron campos de texto válidos"}), 400
         
         # Obtener ROIs para los campos de texto
         rois = []
@@ -246,7 +252,7 @@ async def recognize_text(
                 logger.warning(f"Campo {field} no encontrado en las ROIs disponibles")
 
         if not rois:
-            raise HTTPException(status_code=400, detail="No se encontraron ROIs válidas para los campos seleccionados")
+            return jsonify({"success": False, "error": "No se encontraron ROIs válidas para los campos seleccionados"}), 400
 
         # Procesar texto con Claude
         processor = HandwritingProcessor()
@@ -264,67 +270,70 @@ async def recognize_text(
             }
         }
 
-        return JSONResponse(content=jsonable_encoder(response_data))
+        return jsonify(response_data)
 
     except Exception as e:
         logger.error(f"Error en reconocimiento de texto: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        return jsonify({"success": False, "error": str(e)}), 500
 
-@router.post('/api/recognize-marks')
-async def recognize_marks(
-    request: Request,
-    session_id: str = Form(...),
-    fields: str = Form(...)  # Recibimos los campos como un string JSON
-):
+@processing_bp.route('/api/recognize-marks', methods=['POST'])
+def recognize_marks():
     """Reconocer marcas OMR en las ROIs seleccionadas"""
     try:
+        # Obtener datos de la solicitud
+        session_id = request.form.get('session_id')
+        fields_json = request.form.get('fields')
+        
+        if not session_id:
+            return jsonify({"success": False, "error": "ID de sesión no proporcionado"}), 400
+            
+        if not fields_json:
+            return jsonify({"success": False, "error": "No se especificaron campos"}), 400
+            
         # Convertir el string JSON de campos a lista
         try:
-            fields_list = json.loads(fields)
+            fields_list = json.loads(fields_json)
             if not isinstance(fields_list, list):
                 fields_list = [fields_list]
         except json.JSONDecodeError:
             # Si no es JSON válido, asumimos que es un solo campo
-            fields_list = [fields]
+            fields_list = [fields_json]
 
         logger.info(f"Campos recibidos para marcas: {fields_list}")
 
         # Validar sesión y estado
         session = get_session(session_id)
         if not session:
-            raise HTTPException(status_code=400, detail="Sesión no válida")
+            return jsonify({"success": False, "error": "Sesión no válida"}), 400
             
         if not session.image_path:
-            raise HTTPException(status_code=400, detail="No hay imagen cargada")
+            return jsonify({"success": False, "error": "No hay imagen cargada"}), 400
 
         if not fields_list:
-            raise HTTPException(status_code=400, detail="No se seleccionaron campos")
+            return jsonify({"success": False, "error": "No se seleccionaron campos"}), 400
 
         # Verificar si se debe procesar primero el paso de overlay
         if 'overlay' not in session.completed_steps:
             logger.info("El paso overlay no se ha completado, ejecutándolo automáticamente...")
             # Ejecutar overlay automáticamente
-            await overlay_zones(
-                request=request,
-                session_id=session_id,
-                opacity=0.4,
-                draw_labels=True
-            )
+            overlay_result = overlay_zones()
+            if isinstance(overlay_result, tuple) and overlay_result[1] != 200:
+                return overlay_result
 
         # Verificar que hay ROIs definidas
         if not hasattr(session, 'rois') or not session.rois:
-            raise HTTPException(status_code=400, detail="No hay ROIs definidas en la sesión")
+            return jsonify({"success": False, "error": "No hay ROIs definidas en la sesión"}), 400
 
         logger.info(f"ROIs disponibles en sesión: {session.rois.keys()}")
         
         # Leer imagen para extraer ROIs
         image_path = session.image_path
         if not os.path.exists(image_path):
-            raise HTTPException(status_code=400, detail="Imagen no encontrada")
+            return jsonify({"success": False, "error": "Imagen no encontrada"}), 400
 
         image = cv2.imread(image_path)
         if image is None:
-            raise HTTPException(status_code=400, detail="Error al leer la imagen")
+            return jsonify({"success": False, "error": "Error al leer la imagen"}), 400
 
         # Filtrar solo campos de marca
         mark_fields = []
@@ -333,7 +342,7 @@ async def recognize_marks(
                 mark_fields.append(field)
         
         if not mark_fields:
-            raise HTTPException(status_code=400, detail="No se seleccionaron campos de marca válidos")
+            return jsonify({"success": False, "error": "No se seleccionaron campos de marca válidos"}), 400
         
         # Obtener ROIs para los campos de marca
         rois = []
@@ -358,7 +367,7 @@ async def recognize_marks(
                 logger.warning(f"Campo {field} no encontrado en las ROIs disponibles")
 
         if not rois:
-            raise HTTPException(status_code=400, detail="No se encontraron ROIs válidas para los campos seleccionados")
+            return jsonify({"success": False, "error": "No se encontraron ROIs válidas para los campos seleccionados"}), 400
 
         # Preparar directorio para debug
         debug_dir = os.path.join(settings.RESULTS_FOLDER, f"debug_{session_id}")
@@ -414,28 +423,34 @@ async def recognize_marks(
             }
         }
 
-        return JSONResponse(content=jsonable_encoder(response_data))
+        return jsonify(response_data)
 
     except Exception as e:
         logger.error(f"Error en reconocimiento de marcas: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        return jsonify({"success": False, "error": str(e)}), 500
 
-@router.post('/api/recognize-all')
-async def recognize_all(
-    request: Request,
-    session_id: str = Form(...),
-    fields: str = Form(...)  # Recibimos los campos como un string JSON
-):
+@processing_bp.route('/api/recognize-all', methods=['POST'])
+def recognize_all():
     """Reconocer tanto texto como marcas en un solo endpoint"""
     try:
+        # Obtener datos de la solicitud
+        session_id = request.form.get('session_id')
+        fields_json = request.form.get('fields')
+        
+        if not session_id:
+            return jsonify({"success": False, "error": "ID de sesión no proporcionado"}), 400
+            
+        if not fields_json:
+            return jsonify({"success": False, "error": "No se especificaron campos"}), 400
+            
         # Convertir el string JSON de campos a lista
         try:
-            fields_list = json.loads(fields)
+            fields_list = json.loads(fields_json)
             if not isinstance(fields_list, list):
                 fields_list = [fields_list]
         except json.JSONDecodeError:
             # Si no es JSON válido, asumimos que es un solo campo
-            fields_list = [fields]
+            fields_list = [fields_json]
             
         logger.info(f"Campos recibidos para reconocimiento completo: {fields_list}")
         
@@ -455,21 +470,28 @@ async def recognize_all(
         # Procesar marcas si hay campos de ese tipo
         if mark_fields:
             try:
-                # Crear una petición simulada para marcas
-                mark_form = {
-                    'session_id': session_id,
-                    'fields': json.dumps(mark_fields)
-                }
+                # Crear un objeto form_data simulado para recognize_marks
+                from werkzeug.datastructures import MultiDict
+                mark_form = MultiDict([
+                    ('session_id', session_id),
+                    ('fields', json.dumps(mark_fields))
+                ])
                 
-                # Llamar a la función de reconocimiento de marcas directamente
-                mark_response = await recognize_marks(
-                    request=request,
-                    session_id=session_id,
-                    fields=json.dumps(mark_fields)
-                )
+                # Guardar y restaurar el request.form original
+                original_form = request.form
+                request.form = mark_form
                 
-                # Extraer datos del response
-                mark_data = mark_response
+                # Llamar a la función recognize_marks directamente
+                mark_response = recognize_marks()
+                
+                # Restaurar request.form
+                request.form = original_form
+                
+                # Procesar respuesta
+                if isinstance(mark_response, tuple):
+                    mark_data = json.loads(mark_response[0].get_data(as_text=True))
+                else:
+                    mark_data = json.loads(mark_response.get_data(as_text=True))
                 
                 if mark_data.get('success'):
                     # Integrar resultados de marcas
@@ -489,15 +511,28 @@ async def recognize_all(
         # Procesar texto si hay campos de ese tipo
         if text_fields:
             try:
-                # Llamar a la función de reconocimiento de texto directamente
-                text_response = await recognize_text(
-                    request=request,
-                    session_id=session_id,
-                    fields=json.dumps(text_fields)
-                )
+                # Crear un objeto form_data simulado para recognize_text
+                from werkzeug.datastructures import MultiDict
+                text_form = MultiDict([
+                    ('session_id', session_id),
+                    ('fields', json.dumps(text_fields))
+                ])
                 
-                # Extraer datos del response
-                text_data = text_response
+                # Guardar y restaurar el request.form original
+                original_form = request.form
+                request.form = text_form
+                
+                # Llamar a la función recognize_text directamente
+                text_response = recognize_text()
+                
+                # Restaurar request.form
+                request.form = original_form
+                
+                # Procesar respuesta
+                if isinstance(text_response, tuple):
+                    text_data = json.loads(text_response[0].get_data(as_text=True))
+                else:
+                    text_data = json.loads(text_response.get_data(as_text=True))
                 
                 if text_data.get('success'):
                     # Integrar resultados de texto
@@ -522,8 +557,8 @@ async def recognize_all(
             }
         }
         
-        return JSONResponse(content=jsonable_encoder(response_data))
+        return jsonify(response_data)
         
     except Exception as e:
         logger.error(f"Error en reconocimiento combinado: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        return jsonify({"success": False, "error": str(e)}), 500
