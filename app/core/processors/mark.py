@@ -195,8 +195,8 @@ class MarkProcessor:
                 center_x, center_y = w // 2, h // 2
                 radius = min(w, h) // 2
                 
-                # Reducir área de análisis al 50% (más estricto que 60%)
-                center_radius = int(radius * 0.5)
+                # Área de análisis del 55% (punto medio entre 50% y 60%)
+                center_radius = int(radius * 0.55)
                 
                 # Crear máscara circular
                 mask = np.zeros_like(processed_roi)
@@ -222,21 +222,21 @@ class MarkProcessor:
                         avg_distance = np.mean(distances)
                         std_distance = np.std(distances)
                         
-                        # Penalizaciones más estrictas
-                        if std_distance > center_radius * 0.3:  # Más de 30% del radio
-                            mark_percentage *= 0.7  # Penalización más fuerte
-                        if avg_distance > center_radius * 0.5:  # Marca descentrada
-                            mark_percentage *= 0.8
+                        # Penalizaciones más moderadas
+                        if std_distance > center_radius * 0.35:  # Más de 35% del radio
+                            mark_percentage *= 0.85  # Penalización más suave
+                        if avg_distance > center_radius * 0.6:  # Marca más descentrada
+                            mark_percentage *= 0.9
                         
                         metadata.update({
                             'center_deviation': avg_distance / radius,
                             'distance_std': std_distance / radius
                         })
-                        
+                
                 # Validar conectividad de componentes
                 num_labels, labels = cv2.connectedComponents(center_roi)
-                if num_labels > 3:  # Más de 2 regiones separadas (sin contar fondo)
-                    mark_percentage *= 0.7  # Penalizar marcas fragmentadas
+                if num_labels > 4:  # Más de 3 regiones separadas (más permisivo)
+                    mark_percentage *= 0.85
                 
             else:  # Cuadrado
                 # Calcular área total y marcada
@@ -252,11 +252,11 @@ class MarkProcessor:
                         x_std = np.std(x_indices) / w
                         y_std = np.std(y_indices) / h
                         
-                        # Penalizaciones más estrictas
-                        if x_std < 0.15 or y_std < 0.15:  # Muy concentrado
-                            mark_percentage *= 0.6  # Penalización más fuerte
-                        elif x_std > 0.35 or y_std > 0.35:  # Muy disperso
-                            mark_percentage *= 0.7
+                        # Penalizaciones más moderadas
+                        if x_std < 0.12 or y_std < 0.12:  # Muy concentrado (más permisivo)
+                            mark_percentage *= 0.8
+                        elif x_std > 0.4 or y_std > 0.4:  # Muy disperso
+                            mark_percentage *= 0.85
                             
                         # Calcular centro de masa y desviación del centro
                         center_mass_x = np.mean(x_indices)
@@ -266,31 +266,31 @@ class MarkProcessor:
                             ((center_mass_y - h/2)/(h/2))**2
                         )
                         
-                        if center_deviation > 0.3:  # Marca descentrada
-                            mark_percentage *= 0.8
+                        if center_deviation > 0.35:  # Marca descentrada (más permisivo)
+                            mark_percentage *= 0.9
                             
                         metadata['spatial_distribution'] = (x_std, y_std)
                         metadata['center_deviation'] = center_deviation
                 
                 # Validar conectividad
                 num_labels, labels = cv2.connectedComponents(processed_roi)
-                if num_labels > 3:  # Más de 2 regiones separadas
-                    mark_percentage *= 0.7
+                if num_labels > 4:  # Más de 3 regiones separadas
+                    mark_percentage *= 0.85
             
             # Determinar umbral
             if field_name in self._thresholds:
                 threshold = self._thresholds[field_name]
             elif shape_type == 'circle':
-                threshold = getattr(settings, 'CIRCLE_MARK_THRESHOLD', 35)  # Aumentado a 35%
+                threshold = getattr(settings, 'CIRCLE_MARK_THRESHOLD', 30)  # Punto medio entre 25 y 35
             else:
-                threshold = getattr(settings, 'MARK_THRESHOLD', 40)  # Aumentado a 40%
+                threshold = getattr(settings, 'MARK_THRESHOLD', 35)  # Punto medio entre 30 y 40
             
             # Ajuste dinámico del umbral
             area = w * h
             if area < 400:  # ROI pequeña
-                threshold *= 0.85  # Reducción menor
+                threshold *= 0.9  # Reducción moderada
             elif area > 2000:  # ROI grande
-                threshold *= 1.15
+                threshold *= 1.1  # Aumento moderado
             
             # Decisión final
             is_marked = mark_percentage > threshold
@@ -302,7 +302,7 @@ class MarkProcessor:
                 'mark_percentage': mark_percentage,
                 'threshold': threshold,
                 'area': area,
-                'num_components': num_labels - 1  # Restar el fondo
+                'num_components': num_labels - 1
             })
             
             # Debug
