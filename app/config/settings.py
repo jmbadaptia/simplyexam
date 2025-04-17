@@ -26,7 +26,7 @@ CLAUDE_MAX_TOKENS = int(os.getenv("CLAUDE_MAX_TOKENS", "1000"))
 CLAUDE_TIMEOUT = 30
 
 # Configuración de procesamiento
-MARK_THRESHOLD = 30  # Porcentaje de píxeles marcados para detección
+MARK_THRESHOLD = 25  # Porcentaje de píxeles marcados para detección
 
 # Configuración de logging
 logging.basicConfig(
