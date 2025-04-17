@@ -69,41 +69,25 @@ class MarkProcessor:
                 scale = max(20/h, 20/w)
                 gray = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_LINEAR)
                 
-            # Aplicar CLAHE para mejorar el contraste local
-            clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
+            # Mejorar contraste con CLAHE
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4,4))
             equalized = clahe.apply(gray)
-                
-            # Normalizar la imagen para mejorar el contraste global
-            normalized = cv2.normalize(equalized, None, 0, 255, cv2.NORM_MINMAX)
             
-            # Reducir ruido con filtro de mediana
-            denoised = cv2.medianBlur(normalized, 5)
+            # Reducir ruido con filtro bilateral
+            denoised = cv2.bilateralFilter(equalized, 5, 75, 75)
             
-            # Detectar el umbral óptimo usando el método de Otsu si la ROI es lo suficientemente grande
-            if denoised.size > 100:
-                _, binary_otsu = cv2.threshold(denoised, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-                
-                # Combinar con umbral adaptativo para mejorar la sensibilidad
-                binary_adaptive = cv2.adaptiveThreshold(
-                    denoised, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                    cv2.THRESH_BINARY_INV, 11, 2
-                )
-                
-                # Combinar los dos métodos
-                binary = cv2.bitwise_and(binary_otsu, binary_adaptive)
-            else:
-                # Para ROIs pequeñas, usar solo el umbral adaptativo
-                binary = cv2.adaptiveThreshold(
-                    denoised, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                    cv2.THRESH_BINARY_INV, 11, 2
-                )
+            # Aplicar umbral adaptativo con ventana más pequeña
+            binary = cv2.adaptiveThreshold(
+                denoised, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                cv2.THRESH_BINARY_INV, 9, 3
+            )
             
-            # Operaciones morfológicas para limpiar ruido y fortalecer marcas
-            kernel = np.ones((3, 3), np.uint8)
+            # Operaciones morfológicas para limpiar ruido
+            kernel = np.ones((2,2), np.uint8)
             cleaned = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
             
-            # Cerrar pequeños huecos en las marcas
-            kernel_close = np.ones((3, 3), np.uint8)
+            # Cerrar pequeños huecos
+            kernel_close = np.ones((3,3), np.uint8)
             cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_CLOSE, kernel_close)
             
             # Guardar las etapas intermedias si estamos en modo debug
@@ -111,10 +95,9 @@ class MarkProcessor:
                 base_filename = f"{field_name}_"
                 cv2.imwrite(os.path.join(self._debug_folder, f"{base_filename}1_gray.png"), gray)
                 cv2.imwrite(os.path.join(self._debug_folder, f"{base_filename}2_equalized.png"), equalized)
-                cv2.imwrite(os.path.join(self._debug_folder, f"{base_filename}3_normalized.png"), normalized)
-                cv2.imwrite(os.path.join(self._debug_folder, f"{base_filename}4_denoised.png"), denoised)
-                cv2.imwrite(os.path.join(self._debug_folder, f"{base_filename}5_binary.png"), binary)
-                cv2.imwrite(os.path.join(self._debug_folder, f"{base_filename}6_cleaned.png"), cleaned)
+                cv2.imwrite(os.path.join(self._debug_folder, f"{base_filename}3_denoised.png"), denoised)
+                cv2.imwrite(os.path.join(self._debug_folder, f"{base_filename}4_binary.png"), binary)
+                cv2.imwrite(os.path.join(self._debug_folder, f"{base_filename}5_cleaned.png"), cleaned)
                 
             return cleaned
             
@@ -145,10 +128,12 @@ class MarkProcessor:
             else:
                 gray = roi
                 
-            # Detectar círculos usando HoughCircles
+            # Detectar círculos usando HoughCircles con parámetros más estrictos
             circles = cv2.HoughCircles(
                 gray, cv2.HOUGH_GRADIENT, dp=1, minDist=20,
-                param1=50, param2=30, minRadius=5, maxRadius=30
+                param1=50, param2=25, 
+                minRadius=min(gray.shape) // 6,  # Al menos 1/6 del tamaño menor
+                maxRadius=min(gray.shape) // 2   # Como máximo 1/2 del tamaño menor
             )
             
             if circles is not None:
@@ -156,7 +141,7 @@ class MarkProcessor:
             
             # Si no se detectan círculos, buscar rectángulos
             blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-            _, thresh = cv2.threshold(blurred, 127, 255, cv2.THRESH_BINARY)
+            _, thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
             
             # Encontrar contornos
             contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -164,17 +149,20 @@ class MarkProcessor:
             if not contours:
                 return 'square', []
                 
-            # Determinar si es un cuadrado/rectángulo
+            # Analizar el contorno más grande
             largest_contour = max(contours, key=cv2.contourArea)
             perimeter = cv2.arcLength(largest_contour, True)
             approx = cv2.approxPolyDP(largest_contour, 0.04 * perimeter, True)
             
-            # Calcular relación de aspecto
+            # Calcular área y relación de aspecto
+            area = cv2.contourArea(largest_contour)
             x, y, w, h = cv2.boundingRect(largest_contour)
             aspect_ratio = float(w)/h if h > 0 else 0
             
-            # Si tiene 4 vértices y relación de aspecto cercana a 1, es un cuadrado
-            if len(approx) == 4 and 0.8 <= aspect_ratio <= 1.2:
+            # Criterios más estrictos para cuadrados
+            if (len(approx) == 4 and 
+                0.8 <= aspect_ratio <= 1.2 and 
+                area > 0.4 * (w * h)):  # Al menos 40% del área del rectángulo delimitador
                 return 'square', contours
             else:
                 return 'circle', contours
@@ -217,9 +205,9 @@ class MarkProcessor:
                 h, w = processed_roi.shape
                 center_x, center_y = w // 2, h // 2
                 
-                # Definir una región de interés central (70% del área)
+                # Definir una región de interés central (60% del área)
                 radius = min(w, h) // 2
-                center_radius = int(radius * 0.7)
+                center_radius = int(radius * 0.6)
                 
                 # Crear una máscara circular
                 mask = np.zeros_like(processed_roi)
@@ -269,22 +257,24 @@ class MarkProcessor:
                 threshold = self._thresholds[field_name]
             elif shape_type == 'circle':
                 # Los círculos suelen requerir un umbral más bajo
-                threshold = getattr(settings, 'CIRCLE_MARK_THRESHOLD', 10)  # Reducido de 15 a 10
+                threshold = getattr(settings, 'CIRCLE_MARK_THRESHOLD', 25)  # Reducido de 15 a 25
             else:
-                threshold = getattr(settings, 'MARK_THRESHOLD', 15)  # Reducido de 20 a 15
+                threshold = getattr(settings, 'MARK_THRESHOLD', 30)  # Reducido de 20 a 30
                 
             # Ajuste dinámico del umbral basado en el tamaño
             area = w * h
             if area < 400:  # ROI pequeña (menos de 20x20)
-                threshold *= 0.7  # Reducir el umbral en un 30%
+                threshold *= 0.8  # Reducir el umbral en un 20%
+            elif area > 2000:  # ROI grande
+                threshold *= 1.2  # Aumentar el umbral en un 20%
             
             # Ajuste adicional basado en la distribución espacial
             if 'spatial_distribution' in metadata:
                 x_std, y_std = metadata['spatial_distribution']
-                if x_std < 0.2 or y_std < 0.2:  # Distribución muy concentrada
-                    threshold *= 1.1  # Aumentar el umbral en un 10%
+                if x_std < 0.15 or y_std < 0.15:  # Distribución muy concentrada
+                    threshold *= 0.7  # Aumentar el umbral en un 30%
                 elif x_std > 0.4 or y_std > 0.4:  # Distribución muy dispersa
-                    threshold *= 0.9  # Reducir el umbral en un 10%
+                    threshold *= 0.8  # Reducir el umbral en un 20%
             
             is_marked = mark_percentage > threshold
             
