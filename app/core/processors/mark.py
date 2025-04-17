@@ -173,129 +173,147 @@ class MarkProcessor:
             return 'square', []
     
     def process_mark(self, roi, field_name: str = None) -> Tuple[bool, float, Dict[str, Any]]:
-        """
-        Procesar una ROI para detectar si está marcada
-        
-        Args:
-            roi: Imagen ROI en formato numpy
-            field_name: Nombre del campo
-            
-        Returns:
-            Tupla (está_marcado, porcentaje, metadatos)
-        """
         metadata = {}
         
         try:
-            # Obtener tipo de marca (círculo o cuadrado)
+            # Obtener tipo de marca
             shape_type, contours = self.detect_shape(roi, field_name)
             metadata['shape_type'] = shape_type
             
-            # Guardar tamaño original para referencia
-            h, w = roi.shape[:2] if len(roi.shape) >= 2 else (0, 0)
+            # Guardar tamaño original
+            h, w = roi.shape[:2]
             metadata['original_size'] = (w, h)
             
             # Preprocesar ROI
             processed_roi = self.preprocess_roi(roi, field_name)
             if processed_roi is None:
                 return False, 0.0, metadata
-                
-            # Calcular área marcada según el tipo de forma
+            
+            # Calcular área marcada según el tipo
             if shape_type == 'circle':
                 # Para círculos, analizar principalmente el centro
-                h, w = processed_roi.shape
                 center_x, center_y = w // 2, h // 2
-                
-                # Definir una región de interés central (60% del área)
                 radius = min(w, h) // 2
-                center_radius = int(radius * 0.6)
                 
-                # Crear una máscara circular
+                # Reducir área de análisis al 50% (más estricto que 60%)
+                center_radius = int(radius * 0.5)
+                
+                # Crear máscara circular
                 mask = np.zeros_like(processed_roi)
                 cv2.circle(mask, (center_x, center_y), center_radius, 255, -1)
                 
-                # Aplicar la máscara
+                # Aplicar máscara
                 center_roi = cv2.bitwise_and(processed_roi, mask)
                 
-                # Calcular porcentaje de píxeles marcados solo en el área central
+                # Calcular porcentaje en área central
                 center_pixels = np.count_nonzero(mask)
-                marked_pixels = np.count_nonzero(cv2.bitwise_and(processed_roi, mask))
+                marked_pixels = np.count_nonzero(center_roi)
                 mark_percentage = (marked_pixels / center_pixels) * 100 if center_pixels > 0 else 0
                 
-                # Validar la distribución de los píxeles marcados
+                # Validar distribución
                 if marked_pixels > 0:
-                    # Calcular el centro de masa de los píxeles marcados
                     y_indices, x_indices = np.where(center_roi > 0)
                     if len(x_indices) > 0 and len(y_indices) > 0:
-                        center_mass_x = np.mean(x_indices)
-                        center_mass_y = np.mean(y_indices)
-                        distance_from_center = np.sqrt((center_mass_x - center_x)**2 + (center_mass_y - center_y)**2)
-                        metadata['center_deviation'] = distance_from_center / radius
+                        # Calcular distancia al centro y dispersión
+                        distances = np.sqrt(
+                            (x_indices - center_x)**2 + 
+                            (y_indices - center_y)**2
+                        )
+                        avg_distance = np.mean(distances)
+                        std_distance = np.std(distances)
+                        
+                        # Penalizaciones más estrictas
+                        if std_distance > center_radius * 0.3:  # Más de 30% del radio
+                            mark_percentage *= 0.7  # Penalización más fuerte
+                        if avg_distance > center_radius * 0.5:  # Marca descentrada
+                            mark_percentage *= 0.8
+                        
+                        metadata.update({
+                            'center_deviation': avg_distance / radius,
+                            'distance_std': std_distance / radius
+                        })
+                        
+                # Validar conectividad de componentes
+                num_labels, labels = cv2.connectedComponents(center_roi)
+                if num_labels > 3:  # Más de 2 regiones separadas (sin contar fondo)
+                    mark_percentage *= 0.7  # Penalizar marcas fragmentadas
                 
-                # Guardar máscara para debug
-                if self._debug_folder and field_name:
-                    cv2.imwrite(os.path.join(self._debug_folder, f"{field_name}_mask.png"), mask)
-                    cv2.imwrite(os.path.join(self._debug_folder, f"{field_name}_center.png"), center_roi)
-                
-            else:  # Cuadrado/rectángulo
-                # Calcular área total y píxeles marcados
+            else:  # Cuadrado
+                # Calcular área total y marcada
                 total_pixels = processed_roi.size
                 marked_pixels = np.count_nonzero(processed_roi)
                 mark_percentage = (marked_pixels / total_pixels) * 100
                 
-                # Validar la distribución de los píxeles marcados
+                # Validar distribución espacial
                 if marked_pixels > 0:
-                    # Calcular la distribución espacial
                     y_indices, x_indices = np.where(processed_roi > 0)
                     if len(x_indices) > 0 and len(y_indices) > 0:
-                        x_std = np.std(x_indices)
-                        y_std = np.std(y_indices)
-                        metadata['spatial_distribution'] = (x_std/w, y_std/h)
+                        # Calcular dispersión normalizada
+                        x_std = np.std(x_indices) / w
+                        y_std = np.std(y_indices) / h
+                        
+                        # Penalizaciones más estrictas
+                        if x_std < 0.15 or y_std < 0.15:  # Muy concentrado
+                            mark_percentage *= 0.6  # Penalización más fuerte
+                        elif x_std > 0.35 or y_std > 0.35:  # Muy disperso
+                            mark_percentage *= 0.7
+                            
+                        # Calcular centro de masa y desviación del centro
+                        center_mass_x = np.mean(x_indices)
+                        center_mass_y = np.mean(y_indices)
+                        center_deviation = np.sqrt(
+                            ((center_mass_x - w/2)/(w/2))**2 + 
+                            ((center_mass_y - h/2)/(h/2))**2
+                        )
+                        
+                        if center_deviation > 0.3:  # Marca descentrada
+                            mark_percentage *= 0.8
+                            
+                        metadata['spatial_distribution'] = (x_std, y_std)
+                        metadata['center_deviation'] = center_deviation
+                
+                # Validar conectividad
+                num_labels, labels = cv2.connectedComponents(processed_roi)
+                if num_labels > 3:  # Más de 2 regiones separadas
+                    mark_percentage *= 0.7
             
-            # Determinar si está marcado según umbral correspondiente
+            # Determinar umbral
             if field_name in self._thresholds:
-                # Usar umbral específico para este campo si está definido
                 threshold = self._thresholds[field_name]
             elif shape_type == 'circle':
-                # Los círculos suelen requerir un umbral más bajo
-                threshold = getattr(settings, 'CIRCLE_MARK_THRESHOLD', 25)  # Reducido de 15 a 25
+                threshold = getattr(settings, 'CIRCLE_MARK_THRESHOLD', 35)  # Aumentado a 35%
             else:
-                threshold = getattr(settings, 'MARK_THRESHOLD', 30)  # Reducido de 20 a 30
-                
-            # Ajuste dinámico del umbral basado en el tamaño
+                threshold = getattr(settings, 'MARK_THRESHOLD', 40)  # Aumentado a 40%
+            
+            # Ajuste dinámico del umbral
             area = w * h
-            if area < 400:  # ROI pequeña (menos de 20x20)
-                threshold *= 0.8  # Reducir el umbral en un 20%
+            if area < 400:  # ROI pequeña
+                threshold *= 0.85  # Reducción menor
             elif area > 2000:  # ROI grande
-                threshold *= 1.2  # Aumentar el umbral en un 20%
+                threshold *= 1.15
             
-            # Ajuste adicional basado en la distribución espacial
-            if 'spatial_distribution' in metadata:
-                x_std, y_std = metadata['spatial_distribution']
-                if x_std < 0.15 or y_std < 0.15:  # Distribución muy concentrada
-                    threshold *= 0.7  # Aumentar el umbral en un 30%
-                elif x_std > 0.4 or y_std > 0.4:  # Distribución muy dispersa
-                    threshold *= 0.8  # Reducir el umbral en un 20%
-            
+            # Decisión final
             is_marked = mark_percentage > threshold
             
-            # Guardar información en metadata
+            # Metadata adicional
             metadata.update({
                 'total_pixels': processed_roi.size,
                 'marked_pixels': marked_pixels,
-                'threshold': threshold
+                'mark_percentage': mark_percentage,
+                'threshold': threshold,
+                'area': area,
+                'num_components': num_labels - 1  # Restar el fondo
             })
             
-            # Guardar imagen procesada para debug
+            # Debug
             if self._debug_folder and field_name:
                 cv2.imwrite(os.path.join(self._debug_folder, f"{field_name}_final.png"), processed_roi)
-                
-                # Si hay una imagen original, guardarla con contornos
                 if contours and len(roi.shape) == 3:
                     roi_with_contours = roi.copy()
                     cv2.drawContours(roi_with_contours, contours, -1, (0, 255, 0), 2)
                     cv2.imwrite(os.path.join(self._debug_folder, f"{field_name}_contours.png"), roi_with_contours)
             
-            # Loguear información
+            # Logging detallado
             logger.info(f"Procesamiento de marca {field_name}:")
             logger.info(f"- Tipo: {shape_type}")
             logger.info(f"- Tamaño: {w}x{h}")
@@ -303,6 +321,9 @@ class MarkProcessor:
             logger.info(f"- Píxeles marcados: {marked_pixels}")
             logger.info(f"- Porcentaje: {mark_percentage:.2f}%")
             logger.info(f"- Umbral: {threshold}%")
+            logger.info(f"- Componentes conectados: {num_labels-1}")
+            if 'center_deviation' in metadata:
+                logger.info(f"- Desviación del centro: {metadata['center_deviation']:.3f}")
             logger.info(f"- Estado: {'MARCADO' if is_marked else 'NO MARCADO'}")
             
             return is_marked, mark_percentage, metadata
