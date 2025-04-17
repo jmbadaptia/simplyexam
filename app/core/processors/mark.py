@@ -283,7 +283,7 @@ class MarkProcessor:
             elif shape_type == 'circle':
                 threshold = getattr(settings, 'CIRCLE_MARK_THRESHOLD', 30)  # Punto medio entre 25 y 35
             else:
-                threshold = getattr(settings, 'MARK_THRESHOLD', 35)  # Punto medio entre 30 y 40
+                threshold = getattr(settings, 'MARK_THRESHOLD', 25)  # Ajustado a 25% para capturar marcas en ese rango
             
             # Ajuste dinámico del umbral
             area = w * h
